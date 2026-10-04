@@ -1,5 +1,4 @@
 # Killcraft
-<img width="1919" height="1065" alt="image" src="https://github.com/user-attachments/assets/83544288-46f4-4243-af15-55d44d584b3a" />
 
 **Minecraft inside ULTRAKILL.** You play as a Minecraft player in ULTRAKILL's levels: Minecraft's movement, health, hunger, hotbar, inventory, swords, bows, shields, armour, TNT and block building, against ULTRAKILL's enemies in ULTRAKILL's levels.
 
@@ -13,6 +12,8 @@ It works like [SkyCraft](https://github.com/chasmlol/SkyCraft) (Minecraft inside
 - Getting hurt: enemy hits go to Minecraft's health, so armour, Protection enchantments, golden apples and shields all work (raise the shield towards the enemy).
 - Blocks you place show up in ULTRAKILL with Minecraft's textures, block enemies and their shots, and light the level (torches, lanterns).
 - Arrows stick in walls and in enemies, dropped items lie on the floor, and lit TNT flashes and explodes with an ULTRAKILL explosion.
+- Minecraft mobs fight on your side: spawn zombies, skeletons, iron golems, wolves, creepers, ... with spawn eggs and they go after ULTRAKILL's enemies near them.
+- Potion effects work on the Minecraft player (speed, jump boost, strength, resistance, regeneration, ...).
 - Dying in Minecraft is dying in ULTRAKILL (and the other way round). You respawn at ULTRAKILL's checkpoint.
 - Every ULTRAKILL level gets its own place in the Minecraft world.
 
@@ -50,6 +51,7 @@ Minecraft's own controls (WASD, space, shift, mouse buttons, 1-9, E for the inve
 |---|---|---|
 | `ToggleMinecraft` | `F9` | The key that turns Minecraft off and on |
 | `FreshWorldEachLaunch` | `true` | Every session starts with a fresh Minecraft world and the starting kit. `false` keeps your builds and inventory between sessions |
+| `MobsFightEnemies` | `true` | Minecraft mobs go after ULTRAKILL's enemies near them |
 | `TntFuseTicks` | `40` | How long lit TNT burns (20 = one second; Minecraft's own is 80) |
 | `DigIntoLevels` | `false` | Let TNT and pickaxes dig into ULTRAKILL's level geometry (the holes don't show in ULTRAKILL) |
 | `DamageToUltrakill` | `0.3` | ULTRAKILL damage per point of Minecraft damage you deal |
@@ -63,6 +65,9 @@ Minecraft's own controls (WASD, space, shift, mouse buttons, 1-9, E for the inve
 - ULTRAKILL's own weapons, movement tech and style meter aren't used while Minecraft has the player (F9 switches back).
 - Blocks don't get ULTRAKILL's baked level lighting, so they can look bright in dark levels (see `BlockBrightness`).
 - Minecraft mobs and particles other than TNT, falling blocks and explosions are only partly shown.
+- ULTRAKILL's enemies only ever attack V1, not Minecraft mobs.
+- Effects that only change how Minecraft looks (night vision, blindness, nausea, invisibility) don't show in ULTRAKILL, and invisibility doesn't hide you from its enemies.
+- Commands work, but their "done" messages are hidden (Killcraft runs a command of its own each level).
 
 ## Building from source
 

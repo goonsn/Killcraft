@@ -1,5 +1,4 @@
 # Killcraft
-<img width="1919" height="1065" alt="image" src="https://github.com/user-attachments/assets/b99154fa-c4a7-4e9c-b791-290321a6d12a" />
 
 **Minecraft inside ULTRAKILL.** You play as a Minecraft player in ULTRAKILL's levels: Minecraft's movement, health, hunger, hotbar, inventory, swords, bows, shields, armour, TNT and block building, against ULTRAKILL's enemies in ULTRAKILL's levels.
 
@@ -21,14 +20,16 @@ It works like [SkyCraft](https://github.com/chasmlol/SkyCraft) (Minecraft inside
 - **ULTRAKILL** (Steam).
 - **BepInEx 5** for ULTRAKILL: [BepInEx 5 releases](https://github.com/BepInEx/BepInEx/releases) (`BepInEx_win_x64_5.4.x.zip`), unzipped into the ULTRAKILL folder. Start the game once so BepInEx sets itself up.
 - **Minecraft Java Edition** (a Microsoft account that owns it).
-- **SkyCraft's Minecraft bundle**: `SkyCraft-Minecraft.zip` from the [SkyCraft releases](https://github.com/chasmlol/SkyCraft/releases). It has a portable Prism Launcher with the SkyCraft Minecraft instance; Minecraft and Java download by themselves the first time.
+
+You don't need SkyCraft or Skyrim: the Killcraft download already has SkyCraft's Minecraft bundle in it (`SkyCraft-Minecraft.zip`, a portable Prism Launcher with the SkyCraft Minecraft instance). Minecraft and Java download by themselves the first time.
 
 ## Install
 
-1. Download `Killcraft-<version>.zip` from this page's **Releases** and unzip it into `ULTRAKILL\BepInEx\plugins\`, so you have `ULTRAKILL\BepInEx\plugins\Killcraft\Killcraft.dll`.
-2. Put `SkyCraft-Minecraft.zip` in the same folder: `ULTRAKILL\BepInEx\plugins\Killcraft\SkyCraft-Minecraft.zip` (don't unzip it).
-3. Start ULTRAKILL. Killcraft unpacks and starts Minecraft by itself (hidden). **The first time**, Prism Launcher asks you to sign in to your Microsoft account, and Minecraft and Java download (a few minutes).
-4. Start any level. After a moment Minecraft takes over V1.
+1. Download `Killcraft-<version>.zip` from this page's **Releases** and unzip it into `ULTRAKILL\BepInEx\plugins\`, so you have `ULTRAKILL\BepInEx\plugins\Killcraft\Killcraft.dll`. Leave `SkyCraft-Minecraft.zip` in that folder zipped.
+2. Start ULTRAKILL. Killcraft unpacks and starts Minecraft by itself (hidden). **The first time**, Prism Launcher asks you to sign in to your Microsoft account, and Minecraft and Java download (a few minutes).
+3. Start any level. After a moment Minecraft takes over V1.
+
+To update, unzip the new version over the old one.
 
 ## Controls
 
@@ -76,7 +77,7 @@ The code: `Link.cs`/`Proto.cs` speak SkyCraft's shared-memory protocol, `Host.cs
 
 ## Credits
 
-- [SkyCraft](https://github.com/chasmlol/SkyCraft) by chasmlol (MIT): the Minecraft mod, the link protocol and the idea. Killcraft is the ULTRAKILL side of it.
+- [SkyCraft](https://github.com/chasmlol/SkyCraft) by chasmlol (MIT): the Minecraft mod, the link protocol and the idea. Killcraft is the ULTRAKILL side of it. The release zip includes SkyCraft's unmodified `SkyCraft-Minecraft.zip` with its license (`SkyCraft-LICENSE.txt`) and third-party notices (`SkyCraft-THIRD-PARTY-NOTICES.md`).
 - ULTRAKILL by Arsi "Hakita" Patala / New Blood Interactive. Minecraft by Mojang Studios. Killcraft isn't affiliated with either and contains none of their files.
 
 ## License

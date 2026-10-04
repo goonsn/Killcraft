@@ -1,5 +1,4 @@
 # Killcraft
-<img width="1919" height="1065" alt="image" src="https://github.com/user-attachments/assets/12f90f9a-d887-431f-a8fd-c0272574ca5d" />
 
 **Minecraft inside ULTRAKILL.** You play as a Minecraft player in ULTRAKILL's levels: Minecraft's movement, health, hunger, hotbar, inventory, swords, bows, shields, armour, TNT and block building, against ULTRAKILL's enemies in ULTRAKILL's levels.
 
@@ -42,7 +41,7 @@ Minecraft's own controls (WASD, space, shift, mouse buttons, 1-9, E for the inve
 |---|---|
 | **F9** | Turn Minecraft off (plain ULTRAKILL with your guns) and back on |
 | **O** | Minecraft's menu (options, ...) |
-| **Esc** | ULTRAKILL's pause menu (or closes an open Minecraft screen) |
+| **Esc** | ULTRAKILL's pause menu, which pauses Minecraft too (or closes an open Minecraft screen) |
 
 ## Settings
 
@@ -67,8 +66,12 @@ Minecraft's own controls (WASD, space, shift, mouse buttons, 1-9, E for the inve
 - Blocks don't get ULTRAKILL's baked level lighting, so they can look bright in dark levels (see `BlockBrightness`).
 - Minecraft mobs and particles other than TNT, falling blocks and explosions are only partly shown.
 - ULTRAKILL's enemies only ever attack V1, not Minecraft mobs.
-- Effects that only change how Minecraft looks (night vision, blindness, nausea, invisibility) don't show in ULTRAKILL, and invisibility doesn't hide you from its enemies.
-- Commands work, but their "done" messages are hidden (Killcraft runs a command of its own each level).
+- Flint and steel and fire charges can't light ULTRAKILL's floors and walls, only Minecraft blocks (netherrack burns forever). Enemies walking through fire or lava burn.
+- Minecraft only has the level's collision about 36 blocks around you: an ender pearl thrown further comes back to you.
+- Effects that only change how Minecraft looks (night vision, blindness, darkness, nausea, invisibility) don't show in ULTRAKILL, and invisibility doesn't hide you from its enemies.
+- No third person: F5 does nothing (ULTRAKILL's camera stays in V1's head).
+- Minecraft can't plan mob paths over ULTRAKILL's levels, so Killcraft walks fighting mobs straight at their enemy: they can't find their way around walls or up to other floors. The warden, piglins, hoglins and breezes aren't walked (only set on the enemy).
+- Items held by mobs (a skeleton's bow) can show white.
 
 ## Building from source
 

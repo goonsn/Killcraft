@@ -303,6 +303,43 @@ namespace Killcraft
             return fists.currentPunch != null ? "punch" : "hammer";
         }
 
+        // A swing also parries a projectile in front of V1 (an energy ball, a Schism's shot), as
+        // ULTRAKILL's punch does: its active frames, run on V1's (hidden) Feedbacker arm.
+        private static readonly System.Reflection.MethodInfo punchActive = HarmonyLib.AccessTools.Method(typeof(Punch), "ActiveStart");
+        private static bool parryFailedLogged;
+
+        public static void SwingParry()
+        {
+            if (punchActive == null || !(MonoSingleton.GetInstance(typeof(FistControl)) is FistControl fists))
+            {
+                return;
+            }
+            try
+            {
+                if (fists.currentPunch == null)
+                {
+                    fists.RefreshArm();
+                    if (Patches.OwnsPlayer)
+                    {
+                        fists.NoFist();
+                    }
+                }
+                Punch punch = fists.currentPunch;
+                if (punch != null && punch.type == FistType.Standard)
+                {
+                    punchActive.Invoke(punch, null);
+                }
+            }
+            catch (Exception ex)
+            {
+                if (!parryFailedLogged)
+                {
+                    parryFailedLogged = true;
+                    Plugin.Log.LogWarning($"combat: parrying with a swing failed: {ex.InnerException?.Message ?? ex.Message}");
+                }
+            }
+        }
+
         private static void Hit(EnemyIdentifier eid, in McEvent e)
         {
             float damage = e.A * Plugin.DamageToUltrakill.Value;

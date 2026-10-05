@@ -7,7 +7,7 @@ using UnityEngine.SceneManagement;
 
 namespace Killcraft
 {
-    [BepInPlugin("dev.killcraft", "Killcraft", "0.1.4")]
+    [BepInPlugin("dev.killcraft", "Killcraft", "0.1.5")]
     public sealed class Plugin : BaseUnityPlugin
     {
         internal static ManualLogSource Log;
@@ -25,6 +25,7 @@ namespace Killcraft
         internal static ConfigEntry<string> ToggleKey;
         internal static ConfigEntry<bool> MobsFightEnemies;
         internal static ConfigEntry<bool> AlwaysThorns;
+        internal static ConfigEntry<bool> MobsAttackYouInLevels;
 
         private void Awake()
         {
@@ -55,6 +56,9 @@ namespace Killcraft
                 "and their hits hurt the enemies. Applied when Minecraft starts.");
             AlwaysThorns = Config.Bind("Minecraft", "AlwaysThorns", true,
                 "Thorns armour hits back every time an enemy hurts you (Minecraft's own: 15% a level). Applied when Minecraft starts.");
+            MobsAttackYouInLevels = Config.Bind("Minecraft", "MobsAttackYouInLevels", false,
+                "Minecraft mobs (zombies, skeletons, creepers, ...) attack you in ULTRAKILL's levels too. Off: they're on your side there " +
+                "and only fight ULTRAKILL's enemies; in the Nether they always attack you. Applied when Minecraft starts.");
             ToggleKey = Config.Bind("Controls", "ToggleMinecraft", "F9",
                 "Key that turns Minecraft off (V1 is plain ULTRAKILL again; Minecraft's player waits) and back on. A Unity Input System key name, e.g. F9, F10, Backquote.");
             Diagnostics = Config.Bind("Debug", "Diagnostics", false, "Extra logging (collision sources, timings).");

@@ -34,7 +34,8 @@ namespace Killcraft
             }
             try
             {
-                WriteDataPack(Path.Combine(world, "datapacks", "killcraft"), Plugin.TntFuseTicks.Value, Plugin.MobsFightEnemies.Value, Plugin.AlwaysThorns.Value);
+                WriteDataPack(Path.Combine(world, "datapacks", "killcraft"), Plugin.TntFuseTicks.Value, Plugin.MobsFightEnemies.Value, Plugin.AlwaysThorns.Value,
+                    !Plugin.MobsAttackYouInLevels.Value);
                 string oldPack = Path.Combine(world, "datapacks", "ultracraft");  // this mod's name before 0.1.0
                 if (Directory.Exists(oldPack))
                 {
@@ -65,7 +66,20 @@ namespace Killcraft
                         return true;
                     });
                 }
+                string gen = Path.Combine(world, "data", "minecraft", "world_gen_settings.dat");
+                if (File.Exists(gen))
+                {
+                    Edit(gen, root => AddNether(root, Plugin.FreshWorld.Value));
+                }
                 string players = Path.Combine(world, "players", "data");
+                // A player saved in the Nether starts in the level again (Host walks it to V1).
+                if (Directory.Exists(players))
+                {
+                    foreach (string file in Directory.GetFiles(players, "*.dat"))
+                    {
+                        Edit(file, OutOfTheNether);
+                    }
+                }
                 if (Plugin.FreshWorld.Value)
                 {
                     FreshStart(world, players);
@@ -79,6 +93,59 @@ namespace Killcraft
             {
                 Plugin.Log.LogWarning($"Minecraft: couldn't update the world's settings: {e.Message}");
             }
+        }
+
+        // SkyCraft's world is its void Overworld alone, so portals lead nowhere: Minecraft's own Nether is
+        // added, with its fortresses and bastions (the void Overworld has no structures either way).
+        // A fresh session gets a new Nether too (FreshStart clears its saved chunks).
+        private static bool AddNether(Nbt root, bool fresh)
+        {
+            Nbt data = root.Get("data");
+            Nbt dims = data?.Get("dimensions");
+            if (dims == null || dims.Type != Nbt.TCompound)
+            {
+                return false;
+            }
+            bool changed = false;
+            if (dims.Get("minecraft:the_nether") == null)
+            {
+                var biomes = Nbt.Compound();
+                biomes.Set("type", new Nbt(Nbt.TString, "minecraft:multi_noise"));
+                biomes.Set("preset", new Nbt(Nbt.TString, "minecraft:nether"));
+                var generator = Nbt.Compound();
+                generator.Set("type", new Nbt(Nbt.TString, "minecraft:noise"));
+                generator.Set("settings", new Nbt(Nbt.TString, "minecraft:nether"));
+                generator.Set("biome_source", biomes);
+                var nether = Nbt.Compound();
+                nether.Set("type", new Nbt(Nbt.TString, "minecraft:the_nether"));
+                nether.Set("generator", generator);
+                dims.Set("minecraft:the_nether", nether);
+                Plugin.Log.LogInfo("Minecraft: the world gets a Nether");
+                changed = true;
+            }
+            if (data.Get("generate_structures") is Nbt structures && structures.Type == Nbt.TByte && (sbyte)structures.Value == 0)
+            {
+                structures.Value = (sbyte)1;
+                changed = true;
+            }
+            if (fresh && data.Get("seed") is Nbt seed && seed.Type == Nbt.TLong)
+            {
+                var random = new Random();
+                seed.Value = ((long)random.Next() << 32) ^ (uint)random.Next();
+                changed = true;
+            }
+            return changed;
+        }
+
+        private static bool OutOfTheNether(Nbt root)
+        {
+            if (root.Get("Dimension") is Nbt dim && dim.Type == Nbt.TString && (string)dim.Value != "minecraft:overworld")
+            {
+                dim.Value = "minecraft:overworld";
+                Plugin.Log.LogInfo("Minecraft: the player was saved in the Nether; it starts in the level");
+                return true;
+            }
+            return false;
         }
 
         // SkyCraft's "Skyrim destruction" setting (its pause menu button): mining and explosions dig
@@ -158,17 +225,19 @@ namespace Killcraft
         //  - ender pearls that leave the part of the level Minecraft has collision for (around the
         //    player) would fly through walls and floors: they come back instead;
         //  - stand-ins standing in fire or lava burn (they don't move the way Minecraft's mobs do, so
-        //    Minecraft never checks what they're standing in).
+        //    Minecraft never checks what they're standing in);
+        //  - Nether portals take the player to that level's own part of the Nether (see portals);
+        //  - mobs leave the player alone in the levels, but not in the Nether (see allies).
         // Minecraft enables new packs in the world folder by itself.
-        private static void WriteDataPack(string dir, int fuse, bool mobsFight, bool alwaysThorns)
+        private static void WriteDataPack(string dir, int fuse, bool mobsFight, bool alwaysThorns, bool friendlyMobs)
         {
             fuse = Math.Max(1, Math.Min(fuse, 32767));
             const string standIn = "@e[type=skycraft:skyrim_actor,sort=nearest,limit=1]";
             var files = new Dictionary<string, string>
             {
                 ["pack.mcmeta"] = "{\n  \"pack\": {\n    \"description\": \"Killcraft: shorter TNT fuse, mobs fight ULTRAKILL's enemies\",\n    \"min_format\": 121,\n    \"max_format\": 999\n  }\n}\n",
-                ["data/minecraft/tags/function/load.json"] = "{ \"values\": [\"killcraft:load\"] }\n",
-                ["data/minecraft/tags/function/tick.json"] = "{ \"values\": [\"killcraft:tick\"" + Optional("arrows") + Optional("pearls") + Optional("burn") + Optional("spawn") + Optional("daylight") + Optional("feedback") + (mobsFight ? Optional("mobs") : "") + "] }\n",
+                ["data/minecraft/tags/function/load.json"] = "{ \"values\": [\"killcraft:load\"" + Optional("nether_setup") + Optional("allies_setup") + "] }\n",
+                ["data/minecraft/tags/function/tick.json"] = "{ \"values\": [\"killcraft:tick\"" + Optional("arrows") + Optional("pearls") + Optional("burn") + Optional("spawn") + Optional("daylight") + Optional("feedback") + Optional("portals") + Optional("nether_mobs") + Optional("thorns_watch") + (friendlyMobs ? Optional("allies") : "") + (mobsFight ? Optional("mobs") : "") + "] }\n",
                 // The poke is "generic" damage, which shouldn't shove the mob (it is already in vanilla's list).
                 ["data/minecraft/tags/damage_type/no_knockback.json"] = "{ \"values\": [\"minecraft:generic\"] }\n",
                 ["data/killcraft/tags/entity_type/fighters.json"] = EntityTag(MeleeFighters, RangedFighters, OtherFighters),
@@ -177,7 +246,26 @@ namespace Killcraft
                 ["data/killcraft/function/load.mcfunction"] =
                     "scoreboard objectives add killcraft_fuse dummy\n" +
                     "scoreboard objectives add killcraft_timer dummy\n" +
-                    "scoreboard objectives add killcraft_chase dummy\n",
+                    "scoreboard objectives add killcraft_chase dummy\n" +
+                    "scoreboard objectives add killcraft_hurt dummy\n" +
+                    "scoreboard objectives add killcraft_hurt0 dummy\n",
+                ["data/killcraft/function/nether_setup.mcfunction"] =
+                    "scoreboard objectives add killcraft_portal dummy\n" +
+                    "scoreboard objectives add killcraft_wait dummy\n" +
+                    "scoreboard objectives add killcraft_ox dummy\n" +
+                    "scoreboard objectives add killcraft_oy dummy\n" +
+                    "scoreboard objectives add killcraft_oz dummy\n" +
+                    "scoreboard objectives add killcraft_gx dummy\n" +
+                    "scoreboard objectives add killcraft_gy dummy\n" +
+                    "scoreboard objectives add killcraft_gz dummy\n" +
+                    "scoreboard objectives add killcraft_nx dummy\n" +
+                    "scoreboard objectives add killcraft_nz dummy\n" +
+                    "scoreboard objectives add killcraft_ny dummy\n" +
+                    "scoreboard players set #800 killcraft_timer 800\n" +
+                    $"scoreboard players set #nether killcraft_timer {(int)Coords.NetherX}\n" +
+                    // Players go through portals by Killcraft's portals function, not Minecraft's own trip.
+                    "gamerule minecraft:players_nether_portal_default_delay 2147483647\n" +
+                    "gamerule minecraft:players_nether_portal_creative_delay 2147483647\n",
                 ["data/killcraft/function/tick.mcfunction"] =
                     "execute as @e[type=minecraft:tnt,tag=!killcraft_fuse] store result score @s killcraft_fuse run data get entity @s fuse\n" +
                     $"execute as @e[type=minecraft:tnt,tag=!killcraft_fuse,scores={{killcraft_fuse={fuse + 1}..}}] run data modify entity @s fuse set value {fuse}s\n" +
@@ -194,8 +282,145 @@ namespace Killcraft
                     "execute as @e[type=skycraft:skyrim_actor] at @s positioned ~ ~0.2 ~ if block ~ ~ ~ minecraft:lava run damage @s 4 minecraft:lava\n",
                 ["data/killcraft/function/spawn.mcfunction"] =
                     "scoreboard players add #spawn killcraft_timer 1\n" +
-                    "execute if score #spawn killcraft_timer matches 20.. as @a[nbt={OnGround:1b}] at @s run spawnpoint @s ~ ~ ~\n" +
+                    "execute if score #spawn killcraft_timer matches 20.. as @a[nbt={OnGround:1b}] at @s if dimension minecraft:overworld run function killcraft:spawn_here\n" +
                     "execute if score #spawn killcraft_timer matches 20.. run scoreboard players set #spawn killcraft_timer 0\n",
+                // (Also where a player who somehow got to the Nether without a portal goes back to.)
+                ["data/killcraft/function/spawn_here.mcfunction"] =
+                    "spawnpoint @s ~ ~ ~\n" +
+                    "execute store result score @s killcraft_gx run data get entity @s Pos[0] 100\n" +
+                    "execute store result score @s killcraft_gy run data get entity @s Pos[1] 100\n" +
+                    "execute store result score @s killcraft_gz run data get entity @s Pos[2] 100\n",
+                // Nether portals. Minecraft's own trip would put the player at x/8, z/8 in the Nether, a
+                // place that can't be told apart from a level's area. Instead, standing in a portal for 3
+                // seconds (half a second in creative) sends the player to (NetherX + x/8, z/8) in the
+                // Nether, onto the first floor from y 120 down, with a portal built next to it; any
+                // Nether portal sends the player back to the portal they came through. Killcraft sees
+                // the player at NetherX and shows the Nether (Coords).
+                ["data/killcraft/function/portals.mcfunction"] =
+                    "execute as @a at @s unless block ~ ~ ~ minecraft:nether_portal run scoreboard players set @s killcraft_portal 0\n" +
+                    "execute as @a at @s if block ~ ~ ~ minecraft:nether_portal run scoreboard players add @s killcraft_portal 1\n" +
+                    "execute as @a[tag=killcraft_travelling] run function killcraft:portal_wait\n" +
+                    "execute as @a[gamemode=!creative,tag=!killcraft_travelling,scores={killcraft_portal=60..}] at @s run function killcraft:portal_go\n" +
+                    "execute as @a[gamemode=creative,tag=!killcraft_travelling,scores={killcraft_portal=10..}] at @s run function killcraft:portal_go\n" +
+                    // In the wrong world's place (something teleported the player after the trip by the
+                    // other world's coordinates): back to where the trip ended. Never otherwise: the
+                    // levels are within +-62000, a level's Nether is past NetherX - 10000.
+                    $"execute in minecraft:overworld as @a[x={(int)Coords.NetherX - 10000},y=-2048,z=-1000000,dx=1000000,dy=4096,dz=2000000] run function killcraft:to_overworld\n" +
+                    $"execute in minecraft:the_nether as @a[x=-1000000,y=-2048,z=-1000000,dx={1000000 + (int)Coords.NetherX - 10000},dy=4096,dz=2000000,scores={{killcraft_ny=-1000..}}] run function killcraft:back_to_landing\n",
+                ["data/killcraft/function/back_to_landing.mcfunction"] =
+                    "execute store result storage killcraft:travel x int 1 run scoreboard players get @s killcraft_nx\n" +
+                    "execute store result storage killcraft:travel y int 1 run scoreboard players get @s killcraft_ny\n" +
+                    "execute store result storage killcraft:travel z int 1 run scoreboard players get @s killcraft_nz\n" +
+                    "function killcraft:nether_tp with storage killcraft:travel\n",
+                ["data/killcraft/function/nether_tp.mcfunction"] =
+                    "$execute in minecraft:the_nether run tp @s $(x).5 $(y) $(z).5\n",
+                // (The score stays below zero until the player has stepped out of the portal.)
+                ["data/killcraft/function/portal_go.mcfunction"] =
+                    "scoreboard players set @s killcraft_portal -1000000\n" +
+                    "execute if dimension minecraft:the_nether run return run function killcraft:to_overworld\n" +
+                    "execute if dimension minecraft:overworld run function killcraft:to_nether\n",
+                ["data/killcraft/function/to_nether.mcfunction"] =
+                    "execute store result score @s killcraft_ox run data get entity @s Pos[0] 100\n" +
+                    "execute store result score @s killcraft_oy run data get entity @s Pos[1] 100\n" +
+                    "execute store result score @s killcraft_oz run data get entity @s Pos[2] 100\n" +
+                    "scoreboard players operation @s killcraft_nx = @s killcraft_ox\n" +
+                    "scoreboard players operation @s killcraft_nx /= #800 killcraft_timer\n" +
+                    "scoreboard players operation @s killcraft_nx += #nether killcraft_timer\n" +
+                    "scoreboard players operation @s killcraft_nz = @s killcraft_oz\n" +
+                    "scoreboard players operation @s killcraft_nz /= #800 killcraft_timer\n" +
+                    "scoreboard players set @s killcraft_wait 0\n" +
+                    "tag @s add killcraft_travelling\n" +
+                    "execute store result storage killcraft:travel x int 1 run scoreboard players get @s killcraft_nx\n" +
+                    "execute store result storage killcraft:travel z int 1 run scoreboard players get @s killcraft_nz\n" +
+                    "function killcraft:nether_load with storage killcraft:travel\n",
+                ["data/killcraft/function/nether_load.mcfunction"] =
+                    "$execute in minecraft:the_nether run forceload add $(x) $(z)\n",
+                // The player waits in the portal until that part of the Nether has loaded (10 seconds at most).
+                ["data/killcraft/function/portal_wait.mcfunction"] =
+                    "scoreboard players add @s killcraft_wait 1\n" +
+                    "execute store result storage killcraft:travel x int 1 run scoreboard players get @s killcraft_nx\n" +
+                    "execute store result storage killcraft:travel z int 1 run scoreboard players get @s killcraft_nz\n" +
+                    "function killcraft:nether_try with storage killcraft:travel\n",
+                ["data/killcraft/function/nether_try.mcfunction"] =
+                    $"$execute in minecraft:the_nether positioned $(x).5 {Coords.NetherLandingY} $(z).5 if loaded ~ ~ ~ run return run function killcraft:nether_land\n" +
+                    "$execute if score @s killcraft_wait matches 200.. in minecraft:the_nether run forceload remove $(x) $(z)\n" +
+                    "execute if score @s killcraft_wait matches 200.. run tag @s remove killcraft_travelling\n",
+                // An obsidian floor, room to stand and a lit portal back, the way Minecraft builds one,
+                // always at the same height (Killcraft has to know where the player lands, see Host),
+                // with any lava around it turned to netherrack.
+                ["data/killcraft/function/nether_land.mcfunction"] =
+                    "forceload remove ~ ~\n" +
+                    "fill ~-2 ~-2 ~-2 ~3 ~4 ~3 minecraft:netherrack replace minecraft:lava\n" +
+                    "fill ~-1 ~-1 ~-1 ~2 ~-1 ~2 minecraft:obsidian\n" +
+                    "fill ~-1 ~ ~-1 ~2 ~2 ~1 minecraft:air\n" +
+                    "fill ~-1 ~-1 ~2 ~2 ~3 ~2 minecraft:obsidian\n" +
+                    "fill ~ ~ ~2 ~1 ~2 ~2 minecraft:air\n" +
+                    "setblock ~ ~ ~2 minecraft:fire\n" +
+                    "tp @s ~ ~ ~\n" +
+                    "execute store result score @s killcraft_ny run data get entity @s Pos[1]\n" +
+                    "tag @s remove killcraft_travelling\n" +
+                    "playsound minecraft:block.portal.travel ambient @s ~ ~ ~ 0.25\n",
+                ["data/killcraft/function/to_overworld.mcfunction"] =
+                    "execute unless score @s killcraft_ox = @s killcraft_ox run scoreboard players operation @s killcraft_ox = @s killcraft_gx\n" +
+                    "execute unless score @s killcraft_oy = @s killcraft_oy run scoreboard players operation @s killcraft_oy = @s killcraft_gy\n" +
+                    "execute unless score @s killcraft_oz = @s killcraft_oz run scoreboard players operation @s killcraft_oz = @s killcraft_gz\n" +
+                    "execute unless score @s killcraft_ox = @s killcraft_ox run scoreboard players set @s killcraft_ox 0\n" +
+                    "execute unless score @s killcraft_oy = @s killcraft_oy run scoreboard players set @s killcraft_oy 10000\n" +
+                    "execute unless score @s killcraft_oz = @s killcraft_oz run scoreboard players set @s killcraft_oz 0\n" +
+                    "execute store result storage killcraft:travel x double 0.01 run scoreboard players get @s killcraft_ox\n" +
+                    "execute store result storage killcraft:travel y double 0.01 run scoreboard players get @s killcraft_oy\n" +
+                    "execute store result storage killcraft:travel z double 0.01 run scoreboard players get @s killcraft_oz\n" +
+                    "function killcraft:overworld_tp with storage killcraft:travel\n",
+                ["data/killcraft/function/overworld_tp.mcfunction"] =
+                    "$execute in minecraft:overworld run tp @s $(x) $(y) $(z)\n" +
+                    "playsound minecraft:block.portal.travel ambient @s ~ ~ ~ 0.25\n",
+                // Typed by Killcraft when V1 is back in the level (a checkpoint after dying) but
+                // Minecraft's player is still in the Nether.
+                ["data/killcraft/function/leave_nether.mcfunction"] =
+                    "execute if dimension minecraft:the_nether run function killcraft:to_overworld\n",
+                // Mobs on the player's side in the levels: Minecraft's mobs never pick a target on their
+                // own team (spawned and natural ones alike; ULTRAKILL enemies' stand-ins aren't on it, so
+                // the mobs still go after those). Players are on it only in the Overworld (the levels): in
+                // the Nether every mob is their enemy again. Every half second.
+                ["data/killcraft/function/allies_setup.mcfunction"] = friendlyMobs
+                    ? "team add killcraft\n"
+                    : "team remove killcraft\n",
+                ["data/killcraft/function/allies.mcfunction"] =
+                    "scoreboard players add #allies killcraft_timer 1\n" +
+                    "execute if score #allies killcraft_timer matches 10.. run function killcraft:allies_update\n",
+                ["data/killcraft/function/allies_update.mcfunction"] =
+                    "scoreboard players set #allies killcraft_timer 0\n" +
+                    "execute as @a[team=!killcraft] at @s if dimension minecraft:overworld run team join killcraft @s\n" +
+                    "execute as @a[team=killcraft] at @s unless dimension minecraft:overworld run team leave @s\n" +
+                    "execute as @e[type=!minecraft:player,type=!skycraft:skyrim_actor,team=!killcraft,tag=!killcraft_notmob] run function killcraft:ally\n",
+                // (Only mobs: items, arrows and the like are marked so they aren't looked at again.)
+                ["data/killcraft/function/ally.mcfunction"] =
+                    "execute if data entity @s Health run return run team join killcraft @s\n" +
+                    "tag @s add killcraft_notmob\n",
+                // Thorns against ULTRAKILL's enemies: Minecraft only runs it inside a mob's own attack,
+                // and SkyCraft hurts the player directly with the stand-in as the attacker. So when a
+                // stand-in has just hurt the player (its hurt time started again; a blocked hit doesn't
+                // start it), each armour piece with thorns hits it back (Killcraft turns that into
+                // ULTRAKILL damage, see Combat), every time with AlwaysThorns, else 15% of the time.
+                // (Not an advancement: one Minecraft can't read stops the whole world from loading.)
+                ["data/killcraft/function/thorns_watch.mcfunction"] =
+                    "execute as @a store result score @s killcraft_hurt run data get entity @s HurtTime\n" +
+                    "execute as @a if score @s killcraft_hurt > @s killcraft_hurt0 run function killcraft:thorns\n" +
+                    "execute as @a run scoreboard players operation @s killcraft_hurt0 = @s killcraft_hurt\n",
+                ["data/killcraft/function/thorns.mcfunction"] =
+                    "execute if items entity @s armor.head *[minecraft:enchantments~[{enchantments:\"minecraft:thorns\"}]] run function killcraft:thorns_hit\n" +
+                    "execute if items entity @s armor.chest *[minecraft:enchantments~[{enchantments:\"minecraft:thorns\"}]] run function killcraft:thorns_hit\n" +
+                    "execute if items entity @s armor.legs *[minecraft:enchantments~[{enchantments:\"minecraft:thorns\"}]] run function killcraft:thorns_hit\n" +
+                    "execute if items entity @s armor.feet *[minecraft:enchantments~[{enchantments:\"minecraft:thorns\"}]] run function killcraft:thorns_hit\n",
+                ["data/killcraft/function/thorns_hit.mcfunction"] = (alwaysThorns ? "" : "execute unless predicate {condition:\"minecraft:random_chance\",chance:0.15} run return 0\n") +
+                    "execute on attacker if entity @s[type=skycraft:skyrim_actor] run damage @s 3 minecraft:thorns\n",
+                // SkyCraft turns mob spawning off whenever the world opens. The levels' void never
+                // spawns anything (its one biome has no mobs), so on is only for the Nether.
+                ["data/killcraft/function/nether_mobs.mcfunction"] =
+                    "execute store result score #rule killcraft_timer run gamerule minecraft:spawn_mobs\n" +
+                    "execute if score #rule killcraft_timer matches 0 run gamerule minecraft:spawn_mobs true\n" +
+                    "execute store result score #rule killcraft_timer run gamerule minecraft:spawn_monsters\n" +
+                    "execute if score #rule killcraft_timer matches 0 run gamerule minecraft:spawn_monsters true\n",
                 // ULTRAKILL's levels are in Minecraft daylight: zombies and skeletons would burn (and a
                 // burning zombie sets what it hits alight, V1 too). Mobs that burn in daylight don't
                 // catch fire at all ("burning time" 0); fire and lava still hurt them.
@@ -288,6 +513,16 @@ namespace Killcraft
             else if (File.Exists(thornsPath))
             {
                 File.Delete(thornsPath);
+            }
+            // Files earlier versions wrote that are gone now (a bad advancement stops the world loading).
+            foreach (string stale in new[] { "data/killcraft/advancement/thorns.json", "data/killcraft/function/nether_find.mcfunction",
+                "data/killcraft/function/nether_down.mcfunction", "data/killcraft/tags/block/nether_floor.json" })
+            {
+                string path = Path.Combine(dir, stale.Replace('/', Path.DirectorySeparatorChar));
+                if (File.Exists(path))
+                {
+                    File.Delete(path);
+                }
             }
             foreach (var kv in files)
             {

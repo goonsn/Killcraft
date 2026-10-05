@@ -131,16 +131,21 @@ namespace Killcraft
             var keyboard = UnityEngine.InputSystem.Keyboard.current;
             if (keyboard != null && inGame && !paused && !(Patches.OwnsPlayer && Patches.McScreenOpen) && ToggleKey(keyboard))
             {
-                mcDisabled = !mcDisabled;
                 toggleNotice = 3f;
-                Plugin.Log.LogInfo(mcDisabled ? "Minecraft turned off: ULTRAKILL has V1" : "Minecraft turned back on");
-                if (mcDisabled)
+                // (Not in the Nether: it's only Minecraft's blocks, nothing ULTRAKILL's V1 could stand on.)
+                toggleRefused = Coords.InNether && !mcDisabled;
+                if (!toggleRefused)
                 {
-                    everPuppet = false;  // when it comes back, V1 lands first, as at a level start
-                }
-                else
-                {
-                    needResync = true;
+                    mcDisabled = !mcDisabled;
+                    Plugin.Log.LogInfo(mcDisabled ? "Minecraft turned off: ULTRAKILL has V1" : "Minecraft turned back on");
+                    if (mcDisabled)
+                    {
+                        everPuppet = false;  // when it comes back, V1 lands first, as at a level start
+                    }
+                    else
+                    {
+                        needResync = true;
+                    }
                 }
             }
             toggleNotice -= Time.unscaledDeltaTime;
@@ -155,6 +160,7 @@ namespace Killcraft
                 Coords.SetLevel(worldId);
                 WorldRender.Reposition();
                 WorldRender.LevelLoaded();
+                Nether.LevelChanged();
                 Plugin.Log.LogInfo($"level {scene} (world {worldId:X8}, Minecraft area offset {Coords.OffsetX}, {Coords.OffsetZ})");
                 epoch++;
                 Collision.ForgetMeshes();
@@ -163,6 +169,76 @@ namespace Killcraft
                 teleportPending = true;
                 haveLastSet = false;
                 settle = 0.5f;
+            }
+
+            // Minecraft's player went through a Nether portal, or came back: ULTRAKILL shows that world.
+            // (V1 goes along below, as for an ender pearl.)
+            bool crossed = false;
+            bool mcDead = haveMc && (mc.Flags & Proto.McDead) != 0;
+            // Dying in the Nether respawns Minecraft's player in the level (its spawn point is kept
+            // there), so that's where it is from now. Until the respawned player shows up, its reported
+            // position is still the dead one's in the Nether: no switching back on that, and SkyCraft
+            // isn't asked to hold the player (it would pin the respawned one to the Nether's
+            // coordinates, out in the level's void).
+            if (Coords.InNether && mcDead)
+            {
+                diedInNether = true;
+                respawnedFor = 0f;
+                Coords.SetNether(false);
+                WorldRender.Reposition();
+                Plugin.Log.LogInfo("Minecraft's player died in the Nether: it respawns in the level");
+            }
+            if (diedInNether)
+            {
+                bool back = haveMc && mcInWorld && !mcDead && !Coords.IsNetherX(mc.X);
+                respawnedFor = back ? respawnedFor + Time.unscaledDeltaTime : 0f;
+                if (respawnedFor > 0.5f || !inGame)
+                {
+                    diedInNether = false;
+                }
+            }
+            if (haveMc && mcInWorld && !diedInNether && Coords.IsNetherX(mc.X) != Coords.InNether)
+            {
+                Coords.SetNether(!Coords.InNether);
+                WorldRender.Reposition();
+                crossed = true;
+                if (Coords.InNether)
+                {
+                    Nether.Landed(Coords.ToUnity(mc.X, mc.Y, mc.Z));
+                }
+                Plugin.Log.LogInfo(Coords.InNether ? $"Minecraft's player went to the Nether ({mc.X:0}, {mc.Y:0}, {mc.Z:0})"
+                    : $"Minecraft's player is back from the Nether ({mc.X:0}, {mc.Y:0}, {mc.Z:0})");
+            }
+            // Where Minecraft's player last was in the level (alive): where it comes back to.
+            if (haveMc && mcInWorld && !mcDead && !Coords.InNether && !diedInNether && !Coords.IsNetherX(mc.X))
+            {
+                levelX = mc.X;
+                levelY = mc.Y;
+                levelZ = mc.Z;
+                haveLevelPos = true;
+            }
+            // V1 and Minecraft's player in different worlds without Minecraft having V1: V1 back in the
+            // level (restarted from a checkpoint, a new level) leaves Minecraft's player in the Nether,
+            // which is sent back through its portal (walking it to V1 inside the Nether would drop it
+            // out of the world); V1 still up in the Nether goes to Minecraft's player in the level.
+            bool v1InNether = inGame && Coords.IsNetherUnity(nm.transform.position);
+            bool mcLeftInNether = inGame && haveMc && mcInWorld && Coords.InNether && !v1InNether && !puppet && !crossed;
+            if (inGame && haveMc && mcInWorld && !Coords.InNether && v1InNether && !puppet && !crossed && !nm.dead)
+            {
+                Vector3 root = Coords.ToUnity(mc.X, mc.Y, mc.Z) + Vector3.up * Coords.FeetBelowRoot;
+                Plugin.Log.LogInfo("V1 was still in the Nether: it goes to Minecraft's player");
+                nm.transform.position = root;
+                nm.rb.position = root;
+                lastSetRoot = root;
+                haveLastSet = true;
+            }
+            leaveNetherTimer -= Time.unscaledDeltaTime;
+            leftInNetherFor = mcLeftInNether ? leftInNetherFor + Time.unscaledDeltaTime : 0f;
+            if (leftInNetherFor > 1.5f && !loading && nm.activated && !nm.dead && leaveNetherTimer <= 0f)
+            {
+                leaveNetherTimer = 5f;
+                Plugin.Log.LogInfo("V1 is in the level but Minecraft's player is in the Nether: sending it back through its portal");
+                McCommand.Run("function killcraft:leave_nether");
             }
 
             // ULTRAKILL moved V1 itself (checkpoint, respawn, level script): Minecraft follows. Those
@@ -182,7 +258,9 @@ namespace Killcraft
                 needResync = false;
                 teleportPending = true;
             }
-            if (teleportPending && inGame && !loading && (!alive || Collision.ClearConsumed))
+            // (Never in the Nether: there V1 only ever follows Minecraft's player. A teleport left pending
+            // goes when it's back in the level.)
+            if (teleportPending && inGame && !loading && (!alive || Collision.ClearConsumed) && !Coords.InNether)
             {
                 teleportSeq++;
                 teleportPending = false;
@@ -215,12 +293,16 @@ namespace Killcraft
             // Minecraft's player jumped far by itself while it had V1 (an ender pearl, chorus fruit,
             // /tp): V1 goes there, instead of Minecraft's player being walked back. (ULTRAKILL moving
             // V1 is caught above and leaves a teleport pending.)
-            if (away && puppet && !teleportPending && mc.TeleportAck == teleportSeq && !nm.dead && (mc.Flags & Proto.McDead) == 0)
+            // (Through a Nether portal too: Minecraft may have let go of V1 for a moment on the way.)
+            bool follow = Coords.InNether
+                ? !mcLeftInNether && !ultrakillTakes
+                : (puppet || (crossed && !ultrakillTakes)) && !teleportPending && mc.TeleportAck == teleportSeq;
+            if (away && follow && !nm.dead && !mcDead)
             {
                 Plugin.Log.LogInfo($"Minecraft's player moved itself to ({mc.X:0.0}, {mc.Y:0.0}, {mc.Z:0.0}): V1 follows");
                 away = false;
             }
-            StepTowards(away, inGame && !loading && !ultrakillTakes && !nm.dead, tx, ty, tz);
+            StepTowards(away, inGame && !loading && !ultrakillTakes && !nm.dead && !Coords.InNether, tx, ty, tz);
 
             arriving = haveMc && mcInWorld && inGame && !loading && (mc.TeleportAck != teleportSeq || away) && !ultrakillTakes;
             puppet = haveMc && mcInWorld && inGame && !loading && mc.TeleportAck == teleportSeq && !away && !nm.dead && !ultrakillTakes;
@@ -253,7 +335,8 @@ namespace Killcraft
             // (Respawning puts Minecraft's player at its spawn point: Killcraft's data pack keeps that
             // where the player last stood, so a death is a short move. See McSave.)
             InputForward.Frame(controlled != null && puppet && !paused && !McCommand.Busy, screenOpen, Screen.width, Screen.height);
-            HudHider.Frame(controlled != null && puppet, nm);
+            // (Also while Minecraft is on its way to V1, as through a Nether portal: no flash of ULTRAKILL's HUD.)
+            HudHider.Frame(controlled != null, nm);
             Combat.Frame(alive && inGame && mcInWorld && !mcDisabled, nm);
             while (Link.PopEvent(out McEvent e))
             {
@@ -269,7 +352,7 @@ namespace Killcraft
                 // Also until Minecraft's player is in its world and we know where: it waits where it
                 // is (a saved spot, the spawn after dying), and only then is walked here (StepTowards).
                 Flags = (inGame ? Proto.SkyInGame : 0) | (paused ? Proto.SkyMenuOpen : 0)
-                    | (loading || ultrakillTakes || (nm != null && nm.dead) || (inGame && !(haveMc && mcInWorld)) ? Proto.SkyLoading : 0),
+                    | (loading || (!diedInNether && (ultrakillTakes || (nm != null && nm.dead) || (inGame && !(haveMc && mcInWorld)))) ? Proto.SkyLoading : 0),
                 WorldId = worldId,
                 Epoch = (uint)epoch,
                 TeleportSeq = teleportSeq,
@@ -287,6 +370,29 @@ namespace Killcraft
                     sky.X = wpX;
                     sky.Y = wpY;
                     sky.Z = wpZ;
+                }
+                // SkyCraft also puts a new Minecraft player (one that respawned or changed dimension)
+                // here, straight away: before Killcraft has seen where it is, so this has to be where it
+                // will be. (Wrong, it's a jump to the other world's coordinates, which Minecraft's server
+                // checks block by block, frozen for a minute.) Unless Killcraft is moving Minecraft's
+                // player itself:
+                //  - in the level, Minecraft's player having V1: where the portal it stands in would take
+                //    it (Killcraft's data pack lands it at NetherX + x/8, 70, z/8);
+                //  - in the Nether (any way out of it ends in the level): where it last was in the level,
+                //    the portal it came through (or near its spawn point);
+                //  - V1 still in the Nether (dead, Minecraft's player respawned): the same.
+                bool ownTeleport = teleportPending || haveWaypoint || mc.TeleportAck != teleportSeq || away;
+                if ((Coords.InNether || diedInNether || v1InNether) && haveLevelPos)
+                {
+                    sky.X = levelX;
+                    sky.Y = levelY;
+                    sky.Z = levelZ;
+                }
+                else if (haveMc && mcInWorld && !mcDead && puppet && !ownTeleport)
+                {
+                    sky.X = Coords.NetherX + Math.Floor(mc.X / 8) + 0.5;
+                    sky.Y = Coords.NetherLandingY;
+                    sky.Z = Math.Floor(mc.Z / 8) + 0.5;
                 }
                 // Minecraft's yaw never wraps while you turn (its hand sway follows the change), so
                 // send an unwrapped angle: a jump from 180 to -180 would whip the held item around.
@@ -349,7 +455,9 @@ namespace Killcraft
         // a moment after it got to the last (so its server has handled that move before the next).
         // Minecraft holds its player at a teleport target until it knows the collision there and
         // only then acknowledges it: the waypoints have none, so being there is what counts.
-        private float stepTimer, stepLog, inWorldFor;
+        private float stepTimer, stepLog, inWorldFor, leaveNetherTimer, leftInNetherFor, respawnedFor;
+        private bool diedInNether, haveLevelPos;
+        private double levelX, levelY, levelZ;
         private bool haveWaypoint, everPuppet;
         private const float TeleportUnits = 8f;
         // ULTRAKILL's pause freezes Minecraft's world too (its mobs, TNT, ...). SkyCraft makes no
@@ -364,6 +472,7 @@ namespace Killcraft
             if (freeze != mcFrozen && haveMc && mcInWorld)
             {
                 mcFrozen = freeze;
+                McAudio.SetMuted(Link.McPid(), freeze);
                 if (freeze)
                 {
                     McCommand.Run("function killcraft:mute");
@@ -489,6 +598,13 @@ namespace Killcraft
             }
             Overlay.Frame(haveMc && mcInWorld && controlled != null && !mcFrozen && !McCommand.Busy);
             WorldRender.Frame(haveMc && mcInWorld && inGame);
+            MoveV1();
+            NewMovement v1 = Find<NewMovement>();
+            Nether.Frame(inGame && Coords.InNether && v1 != null && Coords.IsNetherUnity(v1.transform.position), v1 != null ? v1.cc : null);
+        }
+
+        private void MoveV1()
+        {
             if (controlled == null || controlled.cc == null)
             {
                 return;
@@ -513,7 +629,11 @@ namespace Killcraft
         // own renderer uses partial ticks (sampling its per-frame position would judder).
         private void Interpolate(out double x, out double y, out double z, out double eye)
         {
-            if (mc.TickQpc != 0 && mc.TickMs > 0f)
+            // (Not while the tick values are far from where Minecraft's player is drawn: changing
+            // dimension, Minecraft stops ticking for a moment while the new place loads, and they still
+            // hold the old one.)
+            bool ticksStale = Math.Abs(mc.CurX - mc.X) > 4 || Math.Abs(mc.CurY - mc.Y) > 4 || Math.Abs(mc.CurZ - mc.Z) > 4;
+            if (mc.TickQpc != 0 && mc.TickMs > 0f && !ticksStale)
             {
                 if (qpcFrequency == 0)
                 {
@@ -539,7 +659,7 @@ namespace Killcraft
             eye = mc.EyeHeight > 0f ? mc.EyeHeight : 1.62f;
         }
 
-        private bool mcDisabled;
+        private bool mcDisabled, toggleRefused;
         private float toggleNotice;
         private UnityEngine.InputSystem.Key toggleKey = UnityEngine.InputSystem.Key.None;
 
@@ -558,6 +678,10 @@ namespace Killcraft
 
         private string StatusText()
         {
+            if (toggleNotice > 0f && toggleRefused)
+            {
+                return "Killcraft: Minecraft can't be turned off in the Nether (go back through a Nether portal first)";
+            }
             if (toggleNotice > 0f)
             {
                 return mcDisabled

@@ -218,10 +218,8 @@ namespace Killcraft
         //  - mobs near an ULTRAKILL enemy go after it: its stand-in (SkyCraft's skyrim_actor, whose hurts
         //    become ULTRAKILL damage) gives them a harmless poke, and they fight back. Again every 5
         //    seconds, so they move on to the next enemy when theirs dies. See MeleeFighters;
-        //  - arrows stuck in ULTRAKILL's geometry drop when it moves away (a door opening): Minecraft
-        //    only checks a stuck arrow when the block it is in changes, and ULTRAKILL's geometry isn't
-        //    blocks. Remembering another block than the air it's in makes it check every tick (near
-        //    the player only: far away the level's collision may not be loaded);
+        //  - arrows stuck in ULTRAKILL's geometry stay stuck when it moves (Killcraft draws them moving
+        //    with it), undoing what older versions changed (see arrows);
         //  - ender pearls that leave the part of the level Minecraft has collision for (around the
         //    player) would fly through walls and floors: they come back instead;
         //  - stand-ins standing in fire or lava burn (they don't move the way Minecraft's mobs do, so
@@ -232,12 +230,12 @@ namespace Killcraft
         private static void WriteDataPack(string dir, int fuse, bool mobsFight, bool alwaysThorns, bool friendlyMobs)
         {
             fuse = Math.Max(1, Math.Min(fuse, 32767));
-            const string standIn = "@e[type=skycraft:skyrim_actor,sort=nearest,limit=1]";
+            const string standIn = "@e[type=skycraft:skyrim_actor,name=!\"Killcraft arrow\",sort=nearest,limit=1]";
             var files = new Dictionary<string, string>
             {
                 ["pack.mcmeta"] = "{\n  \"pack\": {\n    \"description\": \"Killcraft: shorter TNT fuse, mobs fight ULTRAKILL's enemies\",\n    \"min_format\": 121,\n    \"max_format\": 999\n  }\n}\n",
                 ["data/minecraft/tags/function/load.json"] = "{ \"values\": [\"killcraft:load\"" + Optional("nether_setup") + Optional("allies_setup") + "] }\n",
-                ["data/minecraft/tags/function/tick.json"] = "{ \"values\": [\"killcraft:tick\"" + Optional("arrows") + Optional("pearls") + Optional("burn") + Optional("spawn") + Optional("daylight") + Optional("feedback") + Optional("portals") + Optional("nether_mobs") + Optional("thorns_watch") + (friendlyMobs ? Optional("allies") : "") + (mobsFight ? Optional("mobs") : "") + "] }\n",
+                ["data/minecraft/tags/function/tick.json"] = "{ \"values\": [\"killcraft:tick\"" + Optional("arrows") + Optional("pearls") + Optional("burn") + Optional("spawn") + Optional("daylight") + Optional("feedback") + Optional("portals") + Optional("nether_mobs") + Optional("thorns_watch") + Optional("arrow_pickup") + (friendlyMobs ? Optional("allies") : "") + (mobsFight ? Optional("mobs") : "") + "] }\n",
                 // The poke is "generic" damage, which shouldn't shove the mob (it is already in vanilla's list).
                 ["data/minecraft/tags/damage_type/no_knockback.json"] = "{ \"values\": [\"minecraft:generic\"] }\n",
                 ["data/killcraft/tags/entity_type/fighters.json"] = EntityTag(MeleeFighters, RangedFighters, OtherFighters),
@@ -270,16 +268,29 @@ namespace Killcraft
                     "execute as @e[type=minecraft:tnt,tag=!killcraft_fuse] store result score @s killcraft_fuse run data get entity @s fuse\n" +
                     $"execute as @e[type=minecraft:tnt,tag=!killcraft_fuse,scores={{killcraft_fuse={fuse + 1}..}}] run data modify entity @s fuse set value {fuse}s\n" +
                     "tag @e[type=minecraft:tnt,tag=!killcraft_fuse] add killcraft_fuse\n",
+                // (Killcraft 0.1.4-0.1.5 made arrows in ULTRAKILL's geometry check every tick whether it
+                // was still there, so they'd drop when a door opened. Now Killcraft draws them moving with
+                // the door (WorldRender pins them), so they stay stuck as Minecraft has them: undone.)
+                // Arrows on ULTRAKILL's corpses and floors are only Killcraft's drawing; each is also a
+                // tiny stand-in named "Killcraft arrow" (WorldRender.LooseArrows). A player walking up to
+                // one gets the arrow (not in creative, as Minecraft's own), and the stand-in is poked
+                // with Killcraft's own damage amount so Killcraft takes the arrow away.
+                ["data/killcraft/function/arrow_pickup.mcfunction"] =
+                    $"execute as @e[type=skycraft:skyrim_actor,name=\"{WorldRender.LooseArrowName}\",tag=!killcraft_picked] at @s " +
+                    "if entity @a[distance=..2,gamemode=!spectator] run function killcraft:arrow_picked\n",
+                ["data/killcraft/function/arrow_picked.mcfunction"] =
+                    "tag @s add killcraft_picked\n" +
+                    "give @p[distance=..2,gamemode=!spectator,gamemode=!creative] minecraft:arrow\n" +
+                    "playsound minecraft:entity.item.pickup player @a ~ ~ ~ 0.2 2\n" +
+                    $"damage @s {Combat.PickupPoke.ToString(System.Globalization.CultureInfo.InvariantCulture)} minecraft:generic\n",
                 ["data/killcraft/function/arrows.mcfunction"] =
-                    "execute at @a as @e[type=#killcraft:sticking,distance=..32,nbt={inGround:1b,inBlockState:{Name:\"minecraft:air\"}}] " +
-                    "run data modify entity @s inBlockState set value {Name:\"minecraft:structure_void\"}\n" +
-                    "execute as @e[type=#killcraft:sticking,nbt={inBlockState:{Name:\"minecraft:structure_void\"}}] at @s unless entity @a[distance=..40] " +
+                    "execute as @e[type=#killcraft:sticking,nbt={inBlockState:{Name:\"minecraft:structure_void\"}}] " +
                     "run data modify entity @s inBlockState set value {Name:\"minecraft:air\"}\n",
                 ["data/killcraft/function/pearls.mcfunction"] =
                     "execute as @e[type=minecraft:ender_pearl] at @s positioned ~-36 ~-200 ~-36 unless entity @a[dx=72,dy=220,dz=72] run function killcraft:pearl_back\n",
                 ["data/killcraft/function/burn.mcfunction"] =
-                    "execute as @e[type=skycraft:skyrim_actor] at @s positioned ~ ~0.2 ~ if block ~ ~ ~ #minecraft:fire run damage @s 1 minecraft:in_fire\n" +
-                    "execute as @e[type=skycraft:skyrim_actor] at @s positioned ~ ~0.2 ~ if block ~ ~ ~ minecraft:lava run damage @s 4 minecraft:lava\n",
+                    "execute as @e[type=skycraft:skyrim_actor,name=!\"Killcraft arrow\"] at @s positioned ~ ~0.2 ~ if block ~ ~ ~ #minecraft:fire run damage @s 1 minecraft:in_fire\n" +
+                    "execute as @e[type=skycraft:skyrim_actor,name=!\"Killcraft arrow\"] at @s positioned ~ ~0.2 ~ if block ~ ~ ~ minecraft:lava run damage @s 4 minecraft:lava\n",
                 ["data/killcraft/function/spawn.mcfunction"] =
                     "scoreboard players add #spawn killcraft_timer 1\n" +
                     "execute if score #spawn killcraft_timer matches 20.. as @a[nbt={OnGround:1b}] at @s if dimension minecraft:overworld run function killcraft:spawn_here\n" +
@@ -448,13 +459,13 @@ namespace Killcraft
                     "scoreboard players add #mobs killcraft_timer 1\n" +
                     "execute if score #mobs killcraft_timer matches 100.. run tag @e[tag=killcraft_provoked] remove killcraft_provoked\n" +
                     "execute if score #mobs killcraft_timer matches 100.. run scoreboard players set #mobs killcraft_timer 0\n" +
-                    "execute as @e[type=#killcraft:fighters,tag=!killcraft_provoked] at @s if entity @e[type=skycraft:skyrim_actor,distance=..24] run function killcraft:provoke\n" +
+                    "execute as @e[type=#killcraft:fighters,tag=!killcraft_provoked] at @s if entity @e[type=skycraft:skyrim_actor,name=!\"Killcraft arrow\",distance=..24] run function killcraft:provoke\n" +
                     // Close enough is measured sideways (a box reaching high and low): an enemy flying
                     // above would otherwise draw its mob right underneath it.
-                    "execute as @e[type=#killcraft:melee_fighters,tag=killcraft_provoked] at @s if entity @e[type=skycraft:skyrim_actor,distance=..24] " +
-                    "positioned ~-1 ~-6 ~-1 unless entity @e[type=skycraft:skyrim_actor,dx=2,dy=12,dz=2] positioned as @s run function killcraft:chase\n" +
-                    "execute as @e[type=#killcraft:ranged_fighters,tag=killcraft_provoked] at @s if entity @e[type=skycraft:skyrim_actor,distance=..24] " +
-                    "positioned ~-7 ~-16 ~-7 unless entity @e[type=skycraft:skyrim_actor,dx=14,dy=32,dz=14] positioned as @s run function killcraft:chase\n",
+                    "execute as @e[type=#killcraft:melee_fighters,tag=killcraft_provoked] at @s if entity @e[type=skycraft:skyrim_actor,name=!\"Killcraft arrow\",distance=..24] " +
+                    "positioned ~-1 ~-6 ~-1 unless entity @e[type=skycraft:skyrim_actor,name=!\"Killcraft arrow\",dx=2,dy=12,dz=2] positioned as @s run function killcraft:chase\n" +
+                    "execute as @e[type=#killcraft:ranged_fighters,tag=killcraft_provoked] at @s if entity @e[type=skycraft:skyrim_actor,name=!\"Killcraft arrow\",distance=..24] " +
+                    "positioned ~-7 ~-16 ~-7 unless entity @e[type=skycraft:skyrim_actor,name=!\"Killcraft arrow\",dx=14,dy=32,dz=14] positioned as @s run function killcraft:chase\n",
                 // Walking a mob to the nearest stand-in: its sideways speed set straight at it, about a
                 // zombie's chasing pace (gravity and collision as usual), and it turns to face it. The
                 // direction comes from a marker summoned 0.2 blocks ahead of the mob, facing the

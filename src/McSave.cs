@@ -34,7 +34,7 @@ namespace Killcraft
             }
             try
             {
-                WriteDataPack(Path.Combine(world, "datapacks", "killcraft"), Plugin.TntFuseTicks.Value);
+                WriteDataPack(Path.Combine(world, "datapacks", "killcraft"), Plugin.TntFuseTicks.Value, Plugin.MobsFightEnemies.Value);
                 string oldPack = Path.Combine(world, "datapacks", "ultracraft");  // this mod's name before 0.1.0
                 if (Directory.Exists(oldPack))
                 {
@@ -46,12 +46,13 @@ namespace Killcraft
                     Edit(rules, root =>
                     {
                         Nbt data = root.Get("data");
-                        // The spawn point commands Killcraft runs shouldn't print in the chat.
+                        // Killcraft 0.1.0-0.1.2 turned command messages off (it typed /spawnpoint itself;
+                        // now its data pack does that silently): back on, so players' commands answer.
                         bool changed = false;
                         Nbt feedback = data?.Get("minecraft:send_command_feedback");
-                        if (feedback != null && feedback.Type == Nbt.TByte && (sbyte)feedback.Value != 0)
+                        if (feedback != null && feedback.Type == Nbt.TByte && (sbyte)feedback.Value == 0)
                         {
-                            feedback.Value = (sbyte)0;
+                            feedback.Value = (sbyte)1;
                             changed = true;
                         }
                         Nbt radius = data?.Get("minecraft:respawn_radius");
@@ -105,21 +106,135 @@ namespace Killcraft
             Plugin.Log.LogInfo($"Minecraft: digging into ULTRAKILL's levels {(on ? "on" : "off")}");
         }
 
-        // A data pack that shortens lit TNT's fuse (Minecraft has no setting for it): each new lit
-        // TNT gets at most `fuse` ticks. Minecraft enables new packs in the world folder by itself.
-        private static void WriteDataPack(string dir, int fuse)
+        // Mobs that fight back when hurt (their "hurt by" targeting), so a poke from an enemy's
+        // stand-in sets them on it. Ones a Minecraft version doesn't have are skipped.
+        // Minecraft can't plan a mob's way over ULTRAKILL's geometry (it isn't blocks), so the data pack
+        // walks them there itself: melee mobs up to the enemy, ranged ones to within shooting range.
+        // The rest (flying mobs; the warden, piglins, hoglins and breezes, whose "brain" AI would be
+        // reset by it) are only set on the enemy.
+        private static readonly string[] MeleeFighters =
+        {
+            "zombie", "husk", "drowned", "zombie_villager", "zombified_piglin", "wither_skeleton", "spider",
+            "cave_spider", "creeper", "iron_golem", "wolf", "vindicator", "ravager", "enderman", "endermite",
+            "silverfish", "polar_bear",
+        };
+        private static readonly string[] RangedFighters =
+        {
+            "skeleton", "stray", "bogged", "pillager", "evoker", "witch", "blaze", "llama", "trader_llama",
+        };
+        private static readonly string[] OtherFighters =
+        {
+            "piglin", "piglin_brute", "hoglin", "zoglin", "warden", "breeze", "bee", "vex",
+        };
+
+        private static string EntityTag(params string[][] lists)
+        {
+            var values = new StringBuilder();
+            foreach (string[] list in lists)
+            {
+                foreach (string mob in list)
+                {
+                    values.Append(values.Length == 0 ? "" : ",\n").Append($"    {{ \"id\": \"minecraft:{mob}\", \"required\": false }}");
+                }
+            }
+            return "{\n  \"values\": [\n" + values + "\n  ]\n}\n";
+        }
+
+        // A function tag entry that, if its function doesn't load, is skipped instead of failing the
+        // whole tag (and with it the TNT fuse).
+        private static string Optional(string function) => $", {{ \"id\": \"killcraft:{function}\", \"required\": false }}";
+
+        // A data pack with what Minecraft has no setting for:
+        //  - lit TNT gets at most `fuse` ticks;
+        //  - the spawn point follows the player (where it last stood, checked every second), so
+        //    respawning is a short move (from far away, Minecraft's server freezes for a long time);
+        //  - mobs near an ULTRAKILL enemy go after it: its stand-in (SkyCraft's skyrim_actor, whose hurts
+        //    become ULTRAKILL damage) gives them a harmless poke, and they fight back. Again every 5
+        //    seconds, so they move on to the next enemy when theirs dies. See MeleeFighters;
+        //  - arrows stuck in ULTRAKILL's geometry drop when it moves away (a door opening): Minecraft
+        //    only checks a stuck arrow when the block it is in changes, and ULTRAKILL's geometry isn't
+        //    blocks. Remembering another block than the air it's in makes it check every tick (near
+        //    the player only: far away the level's collision may not be loaded);
+        //  - ender pearls that leave the part of the level Minecraft has collision for (around the
+        //    player) would fly through walls and floors: they come back instead;
+        //  - stand-ins standing in fire or lava burn (they don't move the way Minecraft's mobs do, so
+        //    Minecraft never checks what they're standing in).
+        // Minecraft enables new packs in the world folder by itself.
+        private static void WriteDataPack(string dir, int fuse, bool mobsFight)
         {
             fuse = Math.Max(1, Math.Min(fuse, 32767));
+            const string standIn = "@e[type=skycraft:skyrim_actor,sort=nearest,limit=1]";
             var files = new Dictionary<string, string>
             {
-                ["pack.mcmeta"] = "{\n  \"pack\": {\n    \"description\": \"Killcraft: shorter TNT fuse\",\n    \"min_format\": 121,\n    \"max_format\": 999\n  }\n}\n",
+                ["pack.mcmeta"] = "{\n  \"pack\": {\n    \"description\": \"Killcraft: shorter TNT fuse, mobs fight ULTRAKILL's enemies\",\n    \"min_format\": 121,\n    \"max_format\": 999\n  }\n}\n",
                 ["data/minecraft/tags/function/load.json"] = "{ \"values\": [\"killcraft:load\"] }\n",
-                ["data/minecraft/tags/function/tick.json"] = "{ \"values\": [\"killcraft:tick\"] }\n",
-                ["data/killcraft/function/load.mcfunction"] = "scoreboard objectives add killcraft_fuse dummy\n",
+                ["data/minecraft/tags/function/tick.json"] = "{ \"values\": [\"killcraft:tick\"" + Optional("arrows") + Optional("pearls") + Optional("burn") + Optional("spawn") + Optional("daylight") + (mobsFight ? Optional("mobs") : "") + "] }\n",
+                // The poke is "generic" damage, which shouldn't shove the mob (it is already in vanilla's list).
+                ["data/minecraft/tags/damage_type/no_knockback.json"] = "{ \"values\": [\"minecraft:generic\"] }\n",
+                ["data/killcraft/tags/entity_type/fighters.json"] = EntityTag(MeleeFighters, RangedFighters, OtherFighters),
+                ["data/killcraft/tags/entity_type/melee_fighters.json"] = EntityTag(MeleeFighters),
+                ["data/killcraft/tags/entity_type/ranged_fighters.json"] = EntityTag(RangedFighters),
+                ["data/killcraft/function/load.mcfunction"] =
+                    "scoreboard objectives add killcraft_fuse dummy\n" +
+                    "scoreboard objectives add killcraft_timer dummy\n" +
+                    "scoreboard objectives add killcraft_chase dummy\n",
                 ["data/killcraft/function/tick.mcfunction"] =
                     "execute as @e[type=minecraft:tnt,tag=!killcraft_fuse] store result score @s killcraft_fuse run data get entity @s fuse\n" +
                     $"execute as @e[type=minecraft:tnt,tag=!killcraft_fuse,scores={{killcraft_fuse={fuse + 1}..}}] run data modify entity @s fuse set value {fuse}s\n" +
                     "tag @e[type=minecraft:tnt,tag=!killcraft_fuse] add killcraft_fuse\n",
+                ["data/killcraft/function/arrows.mcfunction"] =
+                    "execute at @a as @e[type=#killcraft:sticking,distance=..32,nbt={inGround:1b,inBlockState:{Name:\"minecraft:air\"}}] " +
+                    "run data modify entity @s inBlockState set value {Name:\"minecraft:structure_void\"}\n" +
+                    "execute as @e[type=#killcraft:sticking,nbt={inBlockState:{Name:\"minecraft:structure_void\"}}] at @s unless entity @a[distance=..40] " +
+                    "run data modify entity @s inBlockState set value {Name:\"minecraft:air\"}\n",
+                ["data/killcraft/function/pearls.mcfunction"] =
+                    "execute as @e[type=minecraft:ender_pearl] at @s positioned ~-36 ~-200 ~-36 unless entity @a[dx=72,dy=220,dz=72] run function killcraft:pearl_back\n",
+                ["data/killcraft/function/burn.mcfunction"] =
+                    "execute as @e[type=skycraft:skyrim_actor] at @s positioned ~ ~0.2 ~ if block ~ ~ ~ #minecraft:fire run damage @s 1 minecraft:in_fire\n" +
+                    "execute as @e[type=skycraft:skyrim_actor] at @s positioned ~ ~0.2 ~ if block ~ ~ ~ minecraft:lava run damage @s 4 minecraft:lava\n",
+                ["data/killcraft/function/spawn.mcfunction"] =
+                    "scoreboard players add #spawn killcraft_timer 1\n" +
+                    "execute if score #spawn killcraft_timer matches 20.. as @a[nbt={OnGround:1b}] at @s run spawnpoint @s ~ ~ ~\n" +
+                    "execute if score #spawn killcraft_timer matches 20.. run scoreboard players set #spawn killcraft_timer 0\n",
+                // ULTRAKILL's levels are in Minecraft daylight: zombies and skeletons would burn (and a
+                // burning zombie sets what it hits alight, V1 too). Mobs that burn in daylight don't
+                // catch fire at all ("burning time" 0); fire and lava still hurt them.
+                ["data/killcraft/function/daylight.mcfunction"] =
+                    "execute as @e[type=#minecraft:burn_in_daylight,tag=!killcraft_fireproof] run attribute @s minecraft:burning_time base set 0\n" +
+                    "tag @e[type=#minecraft:burn_in_daylight,tag=!killcraft_fireproof] add killcraft_fireproof\n",
+                ["data/killcraft/tags/entity_type/sticking.json"] =
+                    "{ \"values\": [\"minecraft:arrow\", \"minecraft:spectral_arrow\", \"minecraft:trident\"] }\n",
+                ["data/killcraft/function/pearl_back.mcfunction"] =
+                    "execute on owner if entity @s[gamemode=!creative] run give @s minecraft:ender_pearl\n" +
+                    "execute on owner run title @s actionbar \"Too far: that part of the level isn't loaded in Minecraft\"\n" +
+                    "kill @s\n",
+                ["data/killcraft/function/mobs.mcfunction"] =
+                    "scoreboard players add #mobs killcraft_timer 1\n" +
+                    "execute if score #mobs killcraft_timer matches 100.. run tag @e[tag=killcraft_provoked] remove killcraft_provoked\n" +
+                    "execute if score #mobs killcraft_timer matches 100.. run scoreboard players set #mobs killcraft_timer 0\n" +
+                    "execute as @e[type=#killcraft:fighters,tag=!killcraft_provoked] at @s if entity @e[type=skycraft:skyrim_actor,distance=..24] run function killcraft:provoke\n" +
+                    // Close enough is measured sideways (a box reaching high and low): an enemy flying
+                    // above would otherwise draw its mob right underneath it.
+                    "execute as @e[type=#killcraft:melee_fighters,tag=killcraft_provoked] at @s if entity @e[type=skycraft:skyrim_actor,distance=..24] " +
+                    "positioned ~-1 ~-6 ~-1 unless entity @e[type=skycraft:skyrim_actor,dx=2,dy=12,dz=2] positioned as @s run function killcraft:chase\n" +
+                    "execute as @e[type=#killcraft:ranged_fighters,tag=killcraft_provoked] at @s if entity @e[type=skycraft:skyrim_actor,distance=..24] " +
+                    "positioned ~-7 ~-16 ~-7 unless entity @e[type=skycraft:skyrim_actor,dx=14,dy=32,dz=14] positioned as @s run function killcraft:chase\n",
+                // Walking a mob to the nearest stand-in: its sideways speed set straight at it, about a
+                // zombie's chasing pace (gravity and collision as usual). Its own AI turns it to face it.
+                ["data/killcraft/function/chase.mcfunction"] =
+                    "execute store result score #x killcraft_chase run data get entity @s Pos[0] 100\n" +
+                    "execute store result score #z killcraft_chase run data get entity @s Pos[2] 100\n" +
+                    $"execute store result score #dx killcraft_chase run data get entity {standIn} Pos[0] 100\n" +
+                    $"execute store result score #dz killcraft_chase run data get entity {standIn} Pos[2] 100\n" +
+                    "scoreboard players operation #dx killcraft_chase -= #x killcraft_chase\n" +
+                    "scoreboard players operation #dz killcraft_chase -= #z killcraft_chase\n" +
+                    "execute if score #dx killcraft_chase matches 30.. run data modify entity @s Motion[0] set value 0.18d\n" +
+                    "execute if score #dx killcraft_chase matches ..-30 run data modify entity @s Motion[0] set value -0.18d\n" +
+                    "execute if score #dz killcraft_chase matches 30.. run data modify entity @s Motion[2] set value 0.18d\n" +
+                    "execute if score #dz killcraft_chase matches ..-30 run data modify entity @s Motion[2] set value -0.18d\n",
+                ["data/killcraft/function/provoke.mcfunction"] =
+                    $"damage @s 0 minecraft:generic by {standIn}\n" +
+                    "tag @s add killcraft_provoked\n",
             };
             foreach (var kv in files)
             {

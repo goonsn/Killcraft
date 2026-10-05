@@ -71,6 +71,8 @@ Minecraft's own controls (WASD, space, shift, mouse buttons, 1-9, E for the inve
 - Minecraft only has the level's collision about 36 blocks around you: an ender pearl thrown further comes back to you.
 - Effects that only change how Minecraft looks (night vision, blindness, darkness, nausea, invisibility) don't show in ULTRAKILL, and invisibility doesn't hide you from its enemies.
 - No third person: F5 does nothing (ULTRAKILL's camera stays in V1's head).
+- Crouching doesn't stop you at edges (SkyCraft turns that off, since Minecraft's edge check only knows Minecraft blocks).
+- Zombies, skeletons and other mobs that burn in daylight don't catch fire at all (ULTRAKILL's levels are in Minecraft daylight).
 - Minecraft can't plan mob paths over ULTRAKILL's levels, so Killcraft walks fighting mobs straight at their enemy: they can't find their way around walls or up to other floors. The warden, piglins, hoglins and breezes aren't walked (only set on the enemy).
 - Items held by mobs (a skeleton's bow) can show white.
 

@@ -39,7 +39,7 @@ namespace Killcraft
         private static readonly List<int> dCrack = new List<int>();
         private static readonly float[] arrowSide = new float[4], arrowBack = new float[4];
         private static bool haveArrowUv;
-        private static readonly LinkedList<GameObject> stuckArrows = new LinkedList<GameObject>();
+        private static readonly LinkedList<(GameObject Arrow, EnemyIdentifier In)> stuckArrows = new LinkedList<(GameObject, EnemyIdentifier)>();
 
         // Entity textures (TNT minecarts, particles' atlas, mobs, ...) for the scene, by Minecraft's id.
         private sealed class EntityTexture
@@ -861,6 +861,7 @@ namespace Killcraft
 
         public static void Frame(bool show)
         {
+            PruneStuckArrows();
             if (!show || cutout == null || atlas == null)
             {
                 if (dynamicGo != null)
@@ -1205,14 +1206,36 @@ namespace Killcraft
             var ar = go.AddComponent<MeshRenderer>();
             ar.sharedMaterial = cutout;
             renderers.Add(ar);
-            stuckArrows.AddLast(go);
+            stuckArrows.AddLast((go, eid));
             while (stuckArrows.Count > 200)
             {
-                if (stuckArrows.First.Value != null)
+                if (stuckArrows.First.Value.Arrow != null)
                 {
-                    UnityEngine.Object.Destroy(stuckArrows.First.Value);
+                    UnityEngine.Object.Destroy(stuckArrows.First.Value.Arrow);
                 }
                 stuckArrows.RemoveFirst();
+            }
+        }
+
+        // An enemy's arrows go when it dies, as in Minecraft: its gibs can leave the body part an
+        // arrow is pinned to hanging in the air.
+        private static void PruneStuckArrows()
+        {
+            var node = stuckArrows.First;
+            while (node != null)
+            {
+                var next = node.Next;
+                (GameObject arrow, EnemyIdentifier eid) = node.Value;
+                if (arrow == null || eid == null || eid.dead)
+                {
+                    if (arrow != null)
+                    {
+                        renderers.Remove(arrow.GetComponent<MeshRenderer>());
+                        UnityEngine.Object.Destroy(arrow);
+                    }
+                    stuckArrows.Remove(node);
+                }
+                node = next;
             }
         }
 

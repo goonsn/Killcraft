@@ -600,7 +600,9 @@ namespace Killcraft
             WorldRender.Frame(haveMc && mcInWorld && inGame);
             MoveV1();
             NewMovement v1 = Find<NewMovement>();
-            Nether.Frame(inGame && Coords.InNether && v1 != null && Coords.IsNetherUnity(v1.transform.position), v1 != null ? v1.cc : null);
+            bool v1InNether = inGame && Coords.InNether && v1 != null && Coords.IsNetherUnity(v1.transform.position);
+            Nether.Frame(v1InNether, v1 != null ? v1.cc : null);
+            NetherWorld.Frame(v1InNether && puppet && !mcFrozen && !v1.dead, v1 != null ? v1.transform.position : Vector3.zero);
         }
 
         private void MoveV1()

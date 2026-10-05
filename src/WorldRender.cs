@@ -62,6 +62,9 @@ namespace Killcraft
 
         public static bool IsOurs(Collider c) => root != null && c.transform.IsChildOf(root.transform);
 
+        // Killcraft's own objects (Collision leaves them out: they're Minecraft's blocks already).
+        public static Transform OurRoot => Root;
+
         private static Transform Root
         {
             get
@@ -733,13 +736,14 @@ namespace Killcraft
 
         // Which blocks are solid: ULTRAKILL colliders (environment layer, so enemies, projectiles and
         // hitscan stop at them) plus navmesh carving so walking enemies path around them.
-        // (Not for the Nether's terrain: thousands of sections full of blocks, and no ULTRAKILL enemies
-        // there yet.)
+        // (The Nether's terrain, thousands of sections full of blocks, gets merged colliders only near V1
+        // and a navmesh of its own instead: NetherWorld.)
         private static void OnSolids(byte* p)
         {
             int sx = *(int*)p, sy = *(int*)(p + 4), sz = *(int*)(p + 8), count = *(int*)(p + 12);
             if (Coords.IsNetherX(sx * 16.0))
             {
+                NetherWorld.Solids(sx, sy, sz, count, (ulong*)(p + 16));
                 count = 0;
             }
             Section s = GetSection(sx, sy, sz, count > 0);
@@ -781,7 +785,8 @@ namespace Killcraft
                         {
                             run++;
                         }
-                        var box = new GameObject("block") { layer = 8 };
+                        // (Tagged as floor: ULTRAKILL's enemies only stand on tagged ground.)
+                        var box = new GameObject("block") { layer = 8, tag = "Floor" };
                         box.transform.SetParent(s.Solids.transform, false);
                         box.transform.localPosition = new Vector3((x + run * 0.5f) * u, (y + 0.5f) * u, -(z + 0.5f) * u);
                         var col = box.AddComponent<BoxCollider>();
@@ -856,6 +861,7 @@ namespace Killcraft
 
         public static void ClearAll()
         {
+            NetherWorld.Clear();
             foreach (Section s in sections.Values)
             {
                 if (s.Go != null)

@@ -14,7 +14,7 @@ It works like [SkyCraft](https://github.com/chasmlol/SkyCraft) (Minecraft inside
 - Blocks you place show up in ULTRAKILL with Minecraft's textures, block enemies and their shots, and light the level (torches, lanterns).
 - Arrows stick in walls, doors (and move with them) and enemies, stay in their corpses, and can be picked up again from corpses and the floor. Dropped items lie on the floor, and lit TNT flashes and explodes with an ULTRAKILL explosion.
 - Minecraft mobs fight on your side: spawn zombies, skeletons, iron golems, wolves, creepers, ... with spawn eggs and they go after ULTRAKILL's enemies near them. In the levels they leave you alone.
-- **The Nether:** build a Nether portal anywhere in a level (`/give @s minecraft:obsidian 14`, then flint and steel) and stand in it for 3 seconds. You go to Minecraft's real Nether, with its own part for every level, and its mobs attack you there. ULTRAKILL shows it around V1, with Minecraft's Nether fog. Any Nether portal brings you back to the portal you came through, and dying there respawns you in the level.
+- **The Nether:** build a Nether portal anywhere in a level (`/give @s minecraft:obsidian 14`, then flint and steel) and stand in it for 3 seconds. You go to Minecraft's real Nether, with its own part for every level, and its mobs attack you there, along with ULTRAKILL enemies that keep turning up around you (filth, strays, drones, schisms, soldiers, and now and then a cerberus, swordsmachine or mindflayer). ULTRAKILL shows it around V1, with Minecraft's Nether fog. Any Nether portal brings you back to the portal you came through, and dying there respawns you in the level.
 - Shields block ULTRAKILL's attacks, thorns armour hurts ULTRAKILL's enemies, and a swing parries projectiles (Stray energy balls, ...) like V1's punch.
 - SMILEOS terminals and shops can be clicked.
 - Potion effects work on the Minecraft player (speed, jump boost, strength, resistance, regeneration, ...).
@@ -57,6 +57,7 @@ Minecraft's own controls (WASD, space, shift, mouse buttons, 1-9, E for the inve
 | `FreshWorldEachLaunch` | `true` | Every session starts with a fresh Minecraft world and the starting kit. `false` keeps your builds and inventory between sessions |
 | `MobsFightEnemies` | `true` | Minecraft mobs go after ULTRAKILL's enemies near them |
 | `MobsAttackYouInLevels` | `false` | Minecraft mobs attack you in ULTRAKILL's levels too (off: they're on your side there; in the Nether they always attack you) |
+| `NetherEnemies` | `6` | How many ULTRAKILL enemies are around you at a time in the Nether (0: none) |
 | `AlwaysThorns` | `true` | Thorns armour hits back every time an enemy hurts you (Minecraft's own: 15% a level) |
 | `TntFuseTicks` | `40` | How long lit TNT burns (20 = one second; Minecraft's own is 80) |
 | `DigIntoLevels` | `false` | Let TNT and pickaxes dig into ULTRAKILL's level geometry (the holes don't show in ULTRAKILL) |
@@ -72,7 +73,8 @@ Minecraft's own controls (WASD, space, shift, mouse buttons, 1-9, E for the inve
 - Blocks don't get ULTRAKILL's baked level lighting, so they can look bright in dark levels (see `BlockBrightness`).
 - Minecraft mobs and particles other than TNT, falling blocks and explosions are only partly shown.
 - ULTRAKILL's enemies only ever attack V1, not Minecraft mobs.
-- There are no ULTRAKILL enemies in the Nether yet (the level's enemies wait in the level and ignore you until you're back). F9 doesn't work in the Nether, since ULTRAKILL's V1 would have nothing to stand on. You always arrive at height 70, in a small room dug out for the portal.
+- The level's own enemies wait in the level and ignore you while you're in the Nether. F9 doesn't work in the Nether, since ULTRAKILL's V1 would have nothing to stand on. You always arrive at height 70, in a small room dug out for the portal.
+- Holding right click (a raised shield, a drawn bow, eating) stops left clicks attacking, as in Minecraft.
 - Mobs on your side in the levels don't fight back when you hit them, and don't fight each other (an iron golem leaves zombies alone).
 - Flint and steel and fire charges light ULTRAKILL's floors only from the side: aim at the bottom of a wall just above the floor, or at the side of a step (aiming straight down at a floor doesn't work). Minecraft blocks light as usual (netherrack burns forever). Enemies walking through fire or lava burn.
 - Minecraft only has the level's collision about 36 blocks around you: an ender pearl thrown further comes back to you.
@@ -93,7 +95,7 @@ dotnet build -c Release
 
 If ULTRAKILL isn't in `C:\Program Files (x86)\Steam\steamapps\common\ULTRAKILL`, add `-p:GameDir="X:\path\to\ULTRAKILL"`. The build copies `Killcraft.dll` into `BepInEx\plugins\Killcraft\`.
 
-The code: `Link.cs`/`Proto.cs` speak SkyCraft's shared-memory protocol, `Host.cs` hands V1 to Minecraft and back, `Collision.cs` streams ULTRAKILL's level geometry to Minecraft, `Combat.cs` mirrors enemies and applies hits, `WorldRender.cs` draws Minecraft's blocks, items and entities, `Overlay.cs` shows Minecraft's HUD, `InputForward.cs` sends the keyboard and mouse to Minecraft, `Nether.cs` makes ULTRAKILL look like the Nether while you're there, `McAudio.cs` mutes Minecraft while paused, and `McSave.cs` prepares Minecraft's world (and writes Killcraft's data pack) before it starts.
+The code: `Link.cs`/`Proto.cs` speak SkyCraft's shared-memory protocol, `Host.cs` hands V1 to Minecraft and back, `Collision.cs` streams ULTRAKILL's level geometry to Minecraft, `Combat.cs` mirrors enemies and applies hits, `WorldRender.cs` draws Minecraft's blocks, items and entities, `Overlay.cs` shows Minecraft's HUD, `InputForward.cs` sends the keyboard and mouse to Minecraft, `Nether.cs` makes ULTRAKILL look like the Nether while you're there, `NetherWorld.cs` gives the Nether's terrain collision, a navmesh and ULTRAKILL enemies, `McAudio.cs` mutes Minecraft while paused, and `McSave.cs` prepares Minecraft's world (and writes Killcraft's data pack) before it starts.
 
 ## Credits
 

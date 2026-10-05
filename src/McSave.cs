@@ -139,13 +139,26 @@ namespace Killcraft
 
         private static bool OutOfTheNether(Nbt root)
         {
+            bool changed = false;
             if (root.Get("Dimension") is Nbt dim && dim.Type == Nbt.TString && (string)dim.Value != "minecraft:overworld")
             {
                 dim.Value = "minecraft:overworld";
-                Plugin.Log.LogInfo("Minecraft: the player was saved in the Nether; it starts in the level");
-                return true;
+                changed = true;
             }
-            return false;
+            // Its position too: left at the Nether's coordinates (out past Coords.NetherX), Host would
+            // take the player in the level for one still in the Nether.
+            if (root.Get("Pos") is Nbt pos && pos.Type == Nbt.TList && pos.Value is List<Nbt> xyz && xyz.Count == 3
+                && xyz[0].Type == Nbt.TDouble && Coords.IsNetherX((double)xyz[0].Value))
+            {
+                xyz[0].Value = ((double)xyz[0].Value - Coords.NetherX) * 8;
+                xyz[2].Value = (double)xyz[2].Value * 8;
+                changed = true;
+            }
+            if (changed)
+            {
+                Plugin.Log.LogInfo("Minecraft: the player was saved in the Nether; it starts in the level");
+            }
+            return changed;
         }
 
         // SkyCraft's "Skyrim destruction" setting (its pause menu button): mining and explosions dig

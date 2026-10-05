@@ -88,15 +88,15 @@ namespace Killcraft
         }
 
         // The stand-in id of whoever hit V1: the enemy itself (melee), or for a projectile the enemy
-        // nearest the line it came along (dir: its flight direction). 0: none known.
+        // nearest the line it came along (dir: its flight direction). 0: no enemy near.
         public static uint AttackerFor(EnemyIdentifier eid, Vector3 from, Vector3 dir)
         {
             if (eid != null && ids.TryGetValue(eid, out uint known))
             {
                 return known;
             }
-            uint best = 0;
-            float bestDist = 15f;
+            uint best = 0, nearest = 0;
+            float bestDist = 15f, nearestDist = float.MaxValue;
             foreach (var kv in byId)
             {
                 EnemyIdentifier e = kv.Value;
@@ -105,6 +105,11 @@ namespace Killcraft
                     continue;
                 }
                 Vector3 to = b.center - from;
+                if (to.sqrMagnitude < nearestDist)
+                {
+                    nearestDist = to.sqrMagnitude;
+                    nearest = kv.Key;
+                }
                 float dist;
                 if (dir.sqrMagnitude > 0f)
                 {
@@ -125,7 +130,9 @@ namespace Killcraft
                     best = kv.Key;
                 }
             }
-            return best;
+            // None near the line (a boss's attack from far off, a thrown sword's odd path): the
+            // nearest enemy, so the hit still counts as theirs and a shield can block it.
+            return best != 0 ? best : nearest;
         }
 
         private static string SafeName(EnemyIdentifier eid)
@@ -265,6 +272,37 @@ namespace Killcraft
             }
         }
 
+        private static uint lastHurtBy;
+        private static float lastHurtTime = -1f;
+
+        // An enemy's hit on the player was just sent to Minecraft (attacker: its stand-in id, 0: none).
+        public static void HurtBy(uint attacker)
+        {
+            lastHurtBy = attacker;
+            lastHurtTime = Time.unscaledTime;
+        }
+
+        // Melee is a punch, so hitting an enemy mid-attack parries it as V1's punch would. ULTRAKILL's
+        // punch hits use V1's current arm, which its fist script only sets up in its own Update (off
+        // while Minecraft has the player): set it up here, kept hidden. With no arm equipped at all,
+        // the hammer's hit, which needs none.
+        private static string MeleeHitter()
+        {
+            if (!(MonoSingleton.GetInstance(typeof(FistControl)) is FistControl fists))
+            {
+                return "hammer";
+            }
+            if (fists.currentPunch == null)
+            {
+                fists.RefreshArm();
+                if (Patches.OwnsPlayer)
+                {
+                    fists.NoFist();
+                }
+            }
+            return fists.currentPunch != null ? "punch" : "hammer";
+        }
+
         private static void Hit(EnemyIdentifier eid, in McEvent e)
         {
             float damage = e.A * Plugin.DamageToUltrakill.Value;
@@ -277,13 +315,25 @@ namespace Killcraft
             {
                 dir.Normalize();
             }
-            Vector3 force = dir * (5000f + e.D * 10000f);
+            bool fire = (e.Flags & Proto.HitFire) != 0;
+            Vector3 force = fire ? Vector3.zero : dir * (5000f + e.D * 10000f);
             Vector3 point = TryBounds(eid, out Bounds b) ? b.center : eid.transform.position;
             bool projectile = (e.Flags & Proto.HitProjectile) != 0;
-            eid.hitter = projectile ? "revolver" : "punch";
+            // Thorns hits back whoever just hurt the player, and Minecraft reports that like a melee hit:
+            // as a punch it would parry their attack (ULTRAKILL then makes V1 invincible for a moment,
+            // so its shots pass through). A hit on that enemy just after, with no swing, is thorns.
+            bool thorns = !projectile && !fire && e.FormId == lastHurtBy && Time.unscaledTime - lastHurtTime < 0.5f
+                && Time.unscaledTime - InputForward.LastAttackPress > 0.5f;
+            eid.hitter = fire ? "fire" : projectile ? "revolver" : thorns ? "thorns" : MeleeHitter();
             try
             {
                 eid.DeliverDamage(eid.gameObject, force, point, damage, false, 0f, null);
+                // Minecraft fire (fire and lava blocks, Fire Aspect, Flame arrows) also sets it alight
+                // in ULTRAKILL: its flames, and a couple of seconds of its own burning after.
+                if (fire && !eid.dead)
+                {
+                    eid.StartBurning(1f);
+                }
             }
             catch (Exception ex)
             {

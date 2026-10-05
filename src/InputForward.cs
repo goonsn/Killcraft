@@ -10,6 +10,8 @@ namespace Killcraft
     // Minecraft's own menu. Mouse look stays ULTRAKILL's camera (sent as the authoritative look).
     internal static class InputForward
     {
+        // When the attack button was last pressed in the world (unscaled time; -1: never).
+        public static float LastAttackPress = -1f;
         private static bool routing;
         private static bool wasScreenOpen;
         private static Vector2 cursor;
@@ -61,6 +63,12 @@ namespace Killcraft
                         continue;
                     }
                     Key key = k.keyCode;
+                    // Minecraft's third person (F5): ULTRAKILL's camera stays in V1's head and doesn't
+                    // draw Minecraft's player, so all that would change is the hand disappearing.
+                    if (key == Key.F5)
+                    {
+                        continue;
+                    }
                     if (!screenOpen)
                     {
                         if (key == Key.Escape)
@@ -94,6 +102,10 @@ namespace Killcraft
 
             if (mouse != null)
             {
+                if (!screenOpen && mouse.leftButton.wasPressedThisFrame)
+                {
+                    LastAttackPress = Time.unscaledTime;
+                }
                 Button(mouse.leftButton, 1);
                 Button(mouse.rightButton, 3);
                 Button(mouse.middleButton, 2);

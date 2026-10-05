@@ -103,8 +103,7 @@ namespace Killcraft
                 settle = 0.5f;
                 if (newProcess)
                 {
-                    spawnPointWorld = 0;
-                    McCommand.Clear();
+                    mcPaused = false;
                 }
             }
             else if (!alive && mcWasAlive)
@@ -212,7 +211,15 @@ namespace Killcraft
                 Coords.ToMc(nm.transform.position - Vector3.up * Coords.FeetBelowRoot, out tx, out ty, out tz);
             }
             bool away = haveMc && mcInWorld && inGame && (Math.Abs(mc.X - tx) > 8 || Math.Abs(mc.Y - ty) > 8 || Math.Abs(mc.Z - tz) > 8);
-            StepTowards(away, !loading && !ultrakillTakes && !nm.dead, tx, ty, tz);
+            // Minecraft's player jumped far by itself while it had V1 (an ender pearl, chorus fruit,
+            // /tp): V1 goes there, instead of Minecraft's player being walked back. (ULTRAKILL moving
+            // V1 is caught above and leaves a teleport pending.)
+            if (away && puppet && !teleportPending && mc.TeleportAck == teleportSeq && !nm.dead && (mc.Flags & Proto.McDead) == 0)
+            {
+                Plugin.Log.LogInfo($"Minecraft's player moved itself to ({mc.X:0.0}, {mc.Y:0.0}, {mc.Z:0.0}): V1 follows");
+                away = false;
+            }
+            StepTowards(away, inGame && !loading && !ultrakillTakes && !nm.dead, tx, ty, tz);
 
             arriving = haveMc && mcInWorld && inGame && !loading && (mc.TeleportAck != teleportSeq || away) && !ultrakillTakes;
             puppet = haveMc && mcInWorld && inGame && !loading && mc.TeleportAck == teleportSeq && !away && !nm.dead && !ultrakillTakes;
@@ -235,19 +242,16 @@ namespace Killcraft
                 nm.deathSequence.gameObject.SetActive(false);
             }
             Patches.OwnsPlayer = controlled != null;
-            Patches.McScreenOpen = screenOpen;
+            Lockout.Frame(controlled != null);
+            // (Also when ULTRAKILL has V1 — toggled off, dead: Minecraft's mobs and TNT carry on otherwise.)
+            PauseMinecraft(paused && inGame && haveMc && mcInWorld);
+            // Minecraft's pause screen opened for ULTRAKILL's pause isn't a Minecraft screen the player
+            // has open: Esc still belongs to ULTRAKILL's menu.
+            Patches.McScreenOpen = screenOpen && !mcPaused;
 
-            // Respawning puts Minecraft's player at its spawn point, and SkyCraft holds the respawned
-            // player where it died meanwhile: from the world spawn (tens of thousands of blocks away)
-            // that is a move that freezes Minecraft's server for most of a minute. So each level
-            // makes where Minecraft's player arrived its spawn point: a death is a short move.
-            if (puppet && (mc.Flags & Proto.McOnGround) != 0 && spawnPointWorld != worldId)
-            {
-                spawnPointWorld = worldId;
-                McCommand.Run($"spawnpoint @s {Math.Floor(mc.X)} {Math.Floor(mc.Y)} {Math.Floor(mc.Z)}");
-            }
-            McCommand.Frame(controlled != null && puppet && !paused, screenOpen);
-            InputForward.Frame(controlled != null && puppet && !paused && !McCommand.Busy, screenOpen, Screen.width, Screen.height);
+            // (Respawning puts Minecraft's player at its spawn point: Killcraft's data pack keeps that
+            // where the player last stood, so a death is a short move. See McSave.)
+            InputForward.Frame(controlled != null && puppet && !paused && !mcPaused, screenOpen, Screen.width, Screen.height);
             HudHider.Frame(controlled != null && puppet, nm);
             Combat.Frame(alive && inGame && mcInWorld && !mcDisabled, nm);
             while (Link.PopEvent(out McEvent e))
@@ -347,7 +351,49 @@ namespace Killcraft
         private float stepTimer, stepLog, inWorldFor;
         private bool haveWaypoint, everPuppet;
         private const float TeleportUnits = 8f;
-        private uint spawnPointWorld;
+        // ULTRAKILL's pause pauses Minecraft too (its mobs, TNT, ...): SkyCraft opens Minecraft's own
+        // pause screen, which stops a singleplayer world, and Esc closes it again on unpausing.
+        // Minecraft takes a few frames to open or close it; until it's seen shut, Minecraft counts as
+        // paused (its screen is hidden and isn't the player's).
+        private bool mcPaused, mcPauseClosing;
+        private float mcPauseTimer;
+        private const ushort SdlEscape = 41;
+
+        private void PauseMinecraft(bool pause)
+        {
+            if (pause)
+            {
+                if (!mcPaused && !screenOpen)
+                {
+                    Link.PushInput(Proto.InOpenMenu);
+                    mcPaused = true;
+                }
+                mcPauseClosing = false;
+                return;
+            }
+            if (!mcPaused)
+            {
+                return;
+            }
+            if (!mcPauseClosing)
+            {
+                mcPauseClosing = true;
+                mcPauseTimer = 0f;
+            }
+            float before = mcPauseTimer;
+            mcPauseTimer += Time.unscaledDeltaTime;
+            // Esc now and every 0.3 s while the screen is (still, or only just) open.
+            if (screenOpen && (before == 0f || (int)(before / 0.3f) != (int)(mcPauseTimer / 0.3f)))
+            {
+                Link.PushInput(Proto.InKey, SdlEscape, 1);
+                Link.PushInput(Proto.InKey, SdlEscape, 0);
+            }
+            if ((!screenOpen && mcPauseTimer > 0.3f) || mcPauseTimer > 2f)
+            {
+                mcPaused = false;
+                mcPauseClosing = false;
+            }
+        }
         private double wpX, wpY, wpZ, wpFromX, wpFromY, wpFromZ;
 
         private void StepTowards(bool away, bool canStep, double tx, double ty, double tz)
@@ -458,7 +504,7 @@ namespace Killcraft
             {
                 WorldRender.DebugCycle();
             }
-            Overlay.Frame(haveMc && mcInWorld && controlled != null);
+            Overlay.Frame(haveMc && mcInWorld && controlled != null && !mcPaused);
             WorldRender.Frame(haveMc && mcInWorld && inGame);
             if (controlled == null || controlled.cc == null)
             {
@@ -493,6 +539,11 @@ namespace Killcraft
                 Native.QueryPerformanceCounter(out long now);
                 double period = mc.TickMs * qpcFrequency / 1000.0;
                 double t = Math.Max(0.0, Math.Min(1.0, (now - mc.TickQpc) / period));
+                // A jump (ender pearl, teleport) isn't movement: no sliding V1 through the walls between.
+                if (Math.Abs(mc.CurX - mc.PrevX) > 4 || Math.Abs(mc.CurY - mc.PrevY) > 4 || Math.Abs(mc.CurZ - mc.PrevZ) > 4)
+                {
+                    t = 1.0;
+                }
                 x = mc.PrevX + (mc.CurX - mc.PrevX) * t;
                 y = mc.PrevY + (mc.CurY - mc.PrevY) * t;
                 z = mc.PrevZ + (mc.CurZ - mc.PrevZ) * t;

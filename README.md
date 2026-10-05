@@ -53,6 +53,7 @@ Minecraft's own controls (WASD, space, shift, mouse buttons, 1-9, E for the inve
 | `ToggleMinecraft` | `F9` | The key that turns Minecraft off and on |
 | `FreshWorldEachLaunch` | `true` | Every session starts with a fresh Minecraft world and the starting kit. `false` keeps your builds and inventory between sessions |
 | `MobsFightEnemies` | `true` | Minecraft mobs go after ULTRAKILL's enemies near them |
+| `AlwaysThorns` | `true` | Thorns armour hits back every time an enemy hurts you (Minecraft's own: 15% a level) |
 | `TntFuseTicks` | `40` | How long lit TNT burns (20 = one second; Minecraft's own is 80) |
 | `DigIntoLevels` | `false` | Let TNT and pickaxes dig into ULTRAKILL's level geometry (the holes don't show in ULTRAKILL) |
 | `DamageToUltrakill` | `0.3` | ULTRAKILL damage per point of Minecraft damage you deal |
@@ -67,7 +68,7 @@ Minecraft's own controls (WASD, space, shift, mouse buttons, 1-9, E for the inve
 - Blocks don't get ULTRAKILL's baked level lighting, so they can look bright in dark levels (see `BlockBrightness`).
 - Minecraft mobs and particles other than TNT, falling blocks and explosions are only partly shown.
 - ULTRAKILL's enemies only ever attack V1, not Minecraft mobs.
-- Flint and steel and fire charges can't light ULTRAKILL's floors and walls, only Minecraft blocks (netherrack burns forever). Enemies walking through fire or lava burn.
+- Flint and steel and fire charges light ULTRAKILL's floors only from the side: aim at the bottom of a wall just above the floor, or at the side of a step (aiming straight down at a floor doesn't work). Minecraft blocks light as usual (netherrack burns forever). Enemies walking through fire or lava burn.
 - Minecraft only has the level's collision about 36 blocks around you: an ender pearl thrown further comes back to you.
 - Effects that only change how Minecraft looks (night vision, blindness, darkness, nausea, invisibility) don't show in ULTRAKILL, and invisibility doesn't hide you from its enemies.
 - No third person: F5 does nothing (ULTRAKILL's camera stays in V1's head).

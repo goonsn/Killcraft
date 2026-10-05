@@ -34,7 +34,7 @@ namespace Killcraft
             }
             try
             {
-                WriteDataPack(Path.Combine(world, "datapacks", "killcraft"), Plugin.TntFuseTicks.Value, Plugin.MobsFightEnemies.Value);
+                WriteDataPack(Path.Combine(world, "datapacks", "killcraft"), Plugin.TntFuseTicks.Value, Plugin.MobsFightEnemies.Value, Plugin.AlwaysThorns.Value);
                 string oldPack = Path.Combine(world, "datapacks", "ultracraft");  // this mod's name before 0.1.0
                 if (Directory.Exists(oldPack))
                 {
@@ -160,7 +160,7 @@ namespace Killcraft
         //  - stand-ins standing in fire or lava burn (they don't move the way Minecraft's mobs do, so
         //    Minecraft never checks what they're standing in).
         // Minecraft enables new packs in the world folder by itself.
-        private static void WriteDataPack(string dir, int fuse, bool mobsFight)
+        private static void WriteDataPack(string dir, int fuse, bool mobsFight, bool alwaysThorns)
         {
             fuse = Math.Max(1, Math.Min(fuse, 32767));
             const string standIn = "@e[type=skycraft:skyrim_actor,sort=nearest,limit=1]";
@@ -168,7 +168,7 @@ namespace Killcraft
             {
                 ["pack.mcmeta"] = "{\n  \"pack\": {\n    \"description\": \"Killcraft: shorter TNT fuse, mobs fight ULTRAKILL's enemies\",\n    \"min_format\": 121,\n    \"max_format\": 999\n  }\n}\n",
                 ["data/minecraft/tags/function/load.json"] = "{ \"values\": [\"killcraft:load\"] }\n",
-                ["data/minecraft/tags/function/tick.json"] = "{ \"values\": [\"killcraft:tick\"" + Optional("arrows") + Optional("pearls") + Optional("burn") + Optional("spawn") + Optional("daylight") + (mobsFight ? Optional("mobs") : "") + "] }\n",
+                ["data/minecraft/tags/function/tick.json"] = "{ \"values\": [\"killcraft:tick\"" + Optional("arrows") + Optional("pearls") + Optional("burn") + Optional("spawn") + Optional("daylight") + Optional("feedback") + (mobsFight ? Optional("mobs") : "") + "] }\n",
                 // The poke is "generic" damage, which shouldn't shove the mob (it is already in vanilla's list).
                 ["data/minecraft/tags/damage_type/no_knockback.json"] = "{ \"values\": [\"minecraft:generic\"] }\n",
                 ["data/killcraft/tags/entity_type/fighters.json"] = EntityTag(MeleeFighters, RangedFighters, OtherFighters),
@@ -202,6 +202,17 @@ namespace Killcraft
                 ["data/killcraft/function/daylight.mcfunction"] =
                     "execute as @e[type=#minecraft:burn_in_daylight,tag=!killcraft_fireproof] run attribute @s minecraft:burning_time base set 0\n" +
                     "tag @e[type=#minecraft:burn_in_daylight,tag=!killcraft_fireproof] add killcraft_fireproof\n",
+                // Killcraft's pause: mute (typed just before /tick freeze) remembers whether command
+                // messages are on and turns them off; unmute (typed after /tick unfreeze) asks for them
+                // back, which happens on the next tick, after that /function's own message (unshown).
+                ["data/killcraft/function/mute.mcfunction"] =
+                    "execute store result score #feedback killcraft_timer run gamerule minecraft:send_command_feedback\n" +
+                    "gamerule minecraft:send_command_feedback false\n",
+                ["data/killcraft/function/unmute.mcfunction"] =
+                    "scoreboard players set #unmute killcraft_timer 1\n",
+                ["data/killcraft/function/feedback.mcfunction"] =
+                    "execute if score #unmute killcraft_timer matches 1 if score #feedback killcraft_timer matches 1 run gamerule minecraft:send_command_feedback true\n" +
+                    "execute if score #unmute killcraft_timer matches 1 run scoreboard players set #unmute killcraft_timer 0\n",
                 ["data/killcraft/tags/entity_type/sticking.json"] =
                     "{ \"values\": [\"minecraft:arrow\", \"minecraft:spectral_arrow\", \"minecraft:trident\"] }\n",
                 ["data/killcraft/function/pearl_back.mcfunction"] =
@@ -220,22 +231,64 @@ namespace Killcraft
                     "execute as @e[type=#killcraft:ranged_fighters,tag=killcraft_provoked] at @s if entity @e[type=skycraft:skyrim_actor,distance=..24] " +
                     "positioned ~-7 ~-16 ~-7 unless entity @e[type=skycraft:skyrim_actor,dx=14,dy=32,dz=14] positioned as @s run function killcraft:chase\n",
                 // Walking a mob to the nearest stand-in: its sideways speed set straight at it, about a
-                // zombie's chasing pace (gravity and collision as usual). Its own AI turns it to face it.
+                // zombie's chasing pace (gravity and collision as usual), and it turns to face it. The
+                // direction comes from a marker summoned 0.2 blocks ahead of the mob, facing the
+                // stand-in: the marker's position minus the mob's is the speed.
                 ["data/killcraft/function/chase.mcfunction"] =
-                    "execute store result score #x killcraft_chase run data get entity @s Pos[0] 100\n" +
-                    "execute store result score #z killcraft_chase run data get entity @s Pos[2] 100\n" +
-                    $"execute store result score #dx killcraft_chase run data get entity {standIn} Pos[0] 100\n" +
-                    $"execute store result score #dz killcraft_chase run data get entity {standIn} Pos[2] 100\n" +
-                    "scoreboard players operation #dx killcraft_chase -= #x killcraft_chase\n" +
-                    "scoreboard players operation #dz killcraft_chase -= #z killcraft_chase\n" +
-                    "execute if score #dx killcraft_chase matches 30.. run data modify entity @s Motion[0] set value 0.18d\n" +
-                    "execute if score #dx killcraft_chase matches ..-30 run data modify entity @s Motion[0] set value -0.18d\n" +
-                    "execute if score #dz killcraft_chase matches 30.. run data modify entity @s Motion[2] set value 0.18d\n" +
-                    "execute if score #dz killcraft_chase matches ..-30 run data modify entity @s Motion[2] set value -0.18d\n",
+                    "execute store result score #x killcraft_chase run data get entity @s Pos[0] 1000\n" +
+                    "execute store result score #z killcraft_chase run data get entity @s Pos[2] 1000\n" +
+                    $"execute facing entity {standIn} feet rotated ~ 0 positioned ^ ^ ^0.2 summon minecraft:marker run function killcraft:chase_step\n" +
+                    "scoreboard players operation #mx killcraft_chase -= #x killcraft_chase\n" +
+                    "scoreboard players operation #mz killcraft_chase -= #z killcraft_chase\n" +
+                    "execute store result entity @s Motion[0] double 0.001 run scoreboard players get #mx killcraft_chase\n" +
+                    "execute store result entity @s Motion[2] double 0.001 run scoreboard players get #mz killcraft_chase\n" +
+                    $"rotate @s facing entity {standIn} eyes\n",
+                ["data/killcraft/function/chase_step.mcfunction"] =
+                    "execute store result score #mx killcraft_chase run data get entity @s Pos[0] 1000\n" +
+                    "execute store result score #mz killcraft_chase run data get entity @s Pos[2] 1000\n" +
+                    "kill @s\n",
                 ["data/killcraft/function/provoke.mcfunction"] =
                     $"damage @s 0 minecraft:generic by {standIn}\n" +
                     "tag @s add killcraft_provoked\n",
             };
+            // Thorns hits back every time an enemy hurts the player, not 15% a level: Minecraft 26.3's
+            // own thorns with only its chance taken out (an enchantment that doesn't load would stop
+            // the whole world loading, so the rest is exactly Minecraft's).
+            string thornsPath = Path.Combine(dir, "data", "minecraft", "enchantment", "thorns.json");
+            if (alwaysThorns)
+            {
+                files["data/minecraft/enchantment/thorns.json"] =
+                    "{\n" +
+                    "  \"anvil_cost\": 8,\n" +
+                    "  \"description\": {\n    \"translate\": \"enchantment.minecraft.thorns\"\n  },\n" +
+                    "  \"effects\": {\n" +
+                    "    \"minecraft:post_attack\": [\n" +
+                    "      {\n" +
+                    "        \"affected\": \"attacker\",\n" +
+                    "        \"effect\": {\n" +
+                    "          \"type\": \"minecraft:all_of\",\n" +
+                    "          \"effects\": [\n" +
+                    "            {\n              \"type\": \"minecraft:damage_entity\",\n              \"damage_type\": \"minecraft:thorns\",\n              \"max_damage\": 5.0,\n              \"min_damage\": 1.0\n            },\n" +
+                    "            {\n              \"type\": \"minecraft:change_item_damage\",\n              \"amount\": 2.0\n            }\n" +
+                    "          ]\n" +
+                    "        },\n" +
+                    "        \"enchanted\": \"victim\"\n" +
+                    "      }\n" +
+                    "    ]\n" +
+                    "  },\n" +
+                    "  \"max_cost\": {\n    \"base\": 60,\n    \"per_level_above_first\": 20\n  },\n" +
+                    "  \"max_level\": 3,\n" +
+                    "  \"min_cost\": {\n    \"base\": 10,\n    \"per_level_above_first\": 20\n  },\n" +
+                    "  \"primary_items\": \"#minecraft:enchantable/chest_armor\",\n" +
+                    "  \"slots\": [\n    \"any\"\n  ],\n" +
+                    "  \"supported_items\": \"#minecraft:enchantable/armor\",\n" +
+                    "  \"weight\": 1\n" +
+                    "}\n";
+            }
+            else if (File.Exists(thornsPath))
+            {
+                File.Delete(thornsPath);
+            }
             foreach (var kv in files)
             {
                 string path = Path.Combine(dir, kv.Key.Replace('/', Path.DirectorySeparatorChar));

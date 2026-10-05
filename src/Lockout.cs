@@ -7,7 +7,8 @@ namespace Killcraft
     // HUD key bindings (but not mouse-look) and every cheat keybind (teleport menu, ...), so keys meant for Minecraft (the
     // hotbar, E, Q, ...) don't also do ULTRAKILL things. Its pause menu stays. ULTRAKILL's scripts
     // also bring the guns and the arm back now and then (level events, cheats); they're put away
-    // again every frame. Everything is switched back on when ULTRAKILL gets the player back.
+    // again every frame (the dual wield power-up's guns too). Everything is switched back on when
+    // ULTRAKILL gets the player back.
     internal static class Lockout
     {
         private static bool locked;
@@ -37,10 +38,12 @@ namespace Killcraft
                     {
                         continue;
                     }
-                    // Mouse-look is in the Movement map and still turns the camera, so it stays on.
+                    // Mouse-look is in the Movement map and still turns the camera, so it stays on. So
+                    // does fire: it's also how ULTRAKILL's terminals and shops (SMILEOS) are clicked,
+                    // and the guns it would fire are put away.
                     foreach (InputAction action in map.actions)
                     {
-                        if (action.enabled && action.name != "Look")
+                        if (action.enabled && action.name != "Look" && action != actions.Weapon.PrimaryFire)
                         {
                             action.Disable();
                             disabled.Add(action);
@@ -64,11 +67,39 @@ namespace Killcraft
             {
                 guns.NoWeapon();
             }
-            if (MonoSingleton.GetInstance(typeof(FistControl)) is FistControl fists && fists.activated)
+            if (MonoSingleton.GetInstance(typeof(FistControl)) is FistControl fists)
             {
-                fists.NoFist();
+                if (fists.activated)
+                {
+                    fists.NoFist();
+                }
+                // Some things bring an arm out without equipping it (SMILEOS terminals' tap
+                // animation, an arm refreshed for a parry): every arm stays put away.
+                foreach (UnityEngine.GameObject arm in spawnedArms(fists))
+                {
+                    if (arm != null && arm.activeSelf)
+                    {
+                        arm.SetActive(false);
+                    }
+                }
+            }
+            // The dual wield power-up's second gun is its own object, which NoWeapon leaves out.
+            dualCheck -= UnityEngine.Time.unscaledDeltaTime;
+            if (dualCheck <= 0f)
+            {
+                dualCheck = 0.25f;
+                foreach (DualWield dual in UnityEngine.Object.FindObjectsOfType<DualWield>())
+                {
+                    dual.gameObject.SetActive(false);
+                    hiddenDuals.Add(dual.gameObject);
+                }
             }
         }
+
+        private static readonly HarmonyLib.AccessTools.FieldRef<FistControl, List<UnityEngine.GameObject>> spawnedArms =
+            HarmonyLib.AccessTools.FieldRefAccess<FistControl, List<UnityEngine.GameObject>>("spawnedArms");
+        private static float dualCheck;
+        private static readonly List<UnityEngine.GameObject> hiddenDuals = new List<UnityEngine.GameObject>();
 
         private static void Unlock()
         {
@@ -78,6 +109,14 @@ namespace Killcraft
                 action?.Enable();
             }
             disabled.Clear();
+            foreach (UnityEngine.GameObject dual in hiddenDuals)
+            {
+                if (dual != null)
+                {
+                    dual.SetActive(true);
+                }
+            }
+            hiddenDuals.Clear();
         }
     }
 }

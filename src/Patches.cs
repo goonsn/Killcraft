@@ -159,6 +159,7 @@ namespace Killcraft
         private static class RangedAttacks
         {
             private static IEnumerable<MethodBase> TargetMethods() => Targets(
+                (typeof(Projectile), "TimeToDie"),              // energy balls etc. hit a moment after touching V1
                 (typeof(RevolverBeam), "ExecuteHits"),          // V2's and others' revolver beams
                 (typeof(Coin), "ShootAtPlayer"),                // V2's coin shots
                 (typeof(ThrownSword), "RecheckPlayerHit"),      // Gabriel's thrown swords

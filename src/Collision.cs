@@ -55,6 +55,8 @@ namespace Killcraft
         private static readonly Dictionary<long, float> sentAt = new Dictionary<long, float>();
         private static readonly Dictionary<long, ulong> sentSignature = new Dictionary<long, ulong>();
         private static float changeCheck;
+        private static int farCheck;
+        private const int FarChecksPerPass = 16;
         private static readonly Collider[] hits = new Collider[2048];
         private static readonly BlockingCollection<RegionJob> queue = new BlockingCollection<RegionJob>();
         private static Thread worker;
@@ -188,6 +190,20 @@ namespace Killcraft
                                 }
                             }
                         }
+                    }
+                }
+                // The rest of what was sent, a few regions each time round (all of it every few
+                // seconds): a door opening or an enemy dying further off would otherwise leave its old
+                // collision in Minecraft, and arrows stuck in it hanging in the air.
+                var all = Order();
+                for (int i = 0; i < FarChecksPerPass; i++)
+                {
+                    var (dx, dy, dz) = all[farCheck++ % all.Length];
+                    long key = Key(rx + dx, ry + dy, rz + dz);
+                    if (sentAt.TryGetValue(key, out float at) && now - at >= 0.25f
+                        && sentSignature.TryGetValue(key, out ulong sent) && Signature(rx + dx, ry + dy, rz + dz) != sent)
+                    {
+                        sentAt.Remove(key);
                     }
                 }
             }

@@ -715,7 +715,8 @@ namespace Killcraft
                 s.Go.AddComponent<MeshFilter>().sharedMesh = s.Mesh;
                 var mr = s.Go.AddComponent<MeshRenderer>();
                 mr.sharedMaterials = new[] { cutout, translucent };
-                mr.shadowCastingMode = ShadowCastingMode.On;
+                // (The Nether is thousands of sections: no shadows from its terrain.)
+                mr.shadowCastingMode = Coords.IsNetherX(s.Sx * 16.0) ? ShadowCastingMode.Off : ShadowCastingMode.On;
                 renderers.Add(mr);
             }
             s.Mesh.Clear();
@@ -732,9 +733,15 @@ namespace Killcraft
 
         // Which blocks are solid: ULTRAKILL colliders (environment layer, so enemies, projectiles and
         // hitscan stop at them) plus navmesh carving so walking enemies path around them.
+        // (Not for the Nether's terrain: thousands of sections full of blocks, and no ULTRAKILL enemies
+        // there yet.)
         private static void OnSolids(byte* p)
         {
             int sx = *(int*)p, sy = *(int*)(p + 4), sz = *(int*)(p + 8), count = *(int*)(p + 12);
+            if (Coords.IsNetherX(sx * 16.0))
+            {
+                count = 0;
+            }
             Section s = GetSection(sx, sy, sz, count > 0);
             if (s == null)
             {
@@ -789,10 +796,16 @@ namespace Killcraft
             }
         }
 
-        // Light-emitting blocks (torches, lava, glowstone) light ULTRAKILL's world too.
+        // Light-emitting blocks (torches, lava, glowstone) light ULTRAKILL's world too. (Not in the
+        // Nether: its lava seas would be thousands of lights. Minecraft's own light levels, in the
+        // vertex colours, light it.)
         private static void OnLights(byte* p)
         {
             int sx = *(int*)p, sy = *(int*)(p + 4), sz = *(int*)(p + 8), count = *(int*)(p + 12);
+            if (Coords.IsNetherX(sx * 16.0))
+            {
+                count = 0;
+            }
             Section s = GetSection(sx, sy, sz, count > 0);
             if (s == null)
             {
@@ -1183,9 +1196,13 @@ namespace Killcraft
             Vector3 hit = Mc(hitMc);
             Transform bone = eid.transform;
             float best = float.MaxValue;
-            foreach (Collider c in eid.GetComponentsInChildren<Collider>())
+            // Its hurtboxes (layers 10, 11) if it has any: not what it holds (a Stray's energy ball,
+            // which it then throws, arrow and all).
+            Collider[] cols = eid.GetComponentsInChildren<Collider>();
+            bool anyHurtbox = Array.Exists(cols, c => c != null && !c.isTrigger && c.enabled && (c.gameObject.layer == 10 || c.gameObject.layer == 11));
+            foreach (Collider c in cols)
             {
-                if (c == null || c.isTrigger || !c.enabled)
+                if (c == null || c.isTrigger || !c.enabled || (anyHurtbox && c.gameObject.layer != 10 && c.gameObject.layer != 11))
                 {
                     continue;
                 }
@@ -1228,16 +1245,60 @@ namespace Killcraft
                 (GameObject arrow, EnemyIdentifier eid) = node.Value;
                 if (arrow == null || eid == null || eid.dead)
                 {
+                    // Its enemy died: the arrow drops out (a body flying apart or vanishing would
+                    // otherwise leave it hanging in the air).
                     if (arrow != null)
                     {
-                        renderers.Remove(arrow.GetComponent<MeshRenderer>());
-                        UnityEngine.Object.Destroy(arrow);
+                        arrow.transform.SetParent(null, true);
+                        fallingArrows.Add(new FallingArrow { Arrow = arrow, Life = 8f });
                     }
                     stuckArrows.Remove(node);
                 }
                 node = next;
             }
+            float dt = Time.deltaTime;
+            for (int i = fallingArrows.Count - 1; i >= 0; i--)
+            {
+                FallingArrow f = fallingArrows[i];
+                f.Life -= dt;
+                if (f.Arrow == null || f.Life <= 0f)
+                {
+                    if (f.Arrow != null)
+                    {
+                        renderers.Remove(f.Arrow.GetComponent<MeshRenderer>());
+                        UnityEngine.Object.Destroy(f.Arrow);
+                    }
+                    fallingArrows.RemoveAt(i);
+                    continue;
+                }
+                if (!f.Landed)
+                {
+                    f.Velocity += Physics.gravity * dt;
+                    Vector3 step = f.Velocity * dt;
+                    Vector3 from = f.Arrow.transform.position;
+                    if (Physics.Raycast(from, step.normalized, out RaycastHit hit, step.magnitude + 0.05f, (1 << 8) | (1 << 24), QueryTriggerInteraction.Ignore))
+                    {
+                        f.Arrow.transform.position = hit.point;
+                        f.Landed = true;
+                    }
+                    else
+                    {
+                        f.Arrow.transform.position = from + step;
+                    }
+                }
+                fallingArrows[i] = f;
+            }
         }
+
+        private struct FallingArrow
+        {
+            public GameObject Arrow;
+            public Vector3 Velocity;
+            public float Life;
+            public bool Landed;
+        }
+
+        private static readonly List<FallingArrow> fallingArrows = new List<FallingArrow>();
 
         // The arrow model in local space, pointing along +Z, in ULTRAKILL units.
         private static Mesh ArrowMesh()

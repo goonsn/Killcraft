@@ -105,6 +105,7 @@ namespace Killcraft
                 if (!screenOpen && mouse.leftButton.wasPressedThisFrame)
                 {
                     LastAttackPress = Time.unscaledTime;
+                    Combat.SwingParry();
                 }
                 Button(mouse.leftButton, 1);
                 Button(mouse.rightButton, 3);

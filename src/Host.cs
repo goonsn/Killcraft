@@ -103,7 +103,8 @@ namespace Killcraft
                 settle = 0.5f;
                 if (newProcess)
                 {
-                    mcPaused = false;
+                    mcFrozen = false;
+                    McCommand.Clear();
                 }
             }
             else if (!alive && mcWasAlive)
@@ -244,14 +245,14 @@ namespace Killcraft
             Patches.OwnsPlayer = controlled != null;
             Lockout.Frame(controlled != null);
             // (Also when ULTRAKILL has V1 — toggled off, dead: Minecraft's mobs and TNT carry on otherwise.)
-            PauseMinecraft(paused && inGame && haveMc && mcInWorld);
-            // Minecraft's pause screen opened for ULTRAKILL's pause isn't a Minecraft screen the player
-            // has open: Esc still belongs to ULTRAKILL's menu.
-            Patches.McScreenOpen = screenOpen && !mcPaused;
+            FreezeMinecraft(paused && inGame);
+            // The chat McCommand opens isn't a Minecraft screen the player has open: Esc still belongs to
+            // ULTRAKILL's menu.
+            Patches.McScreenOpen = screenOpen && !McCommand.Busy;
 
             // (Respawning puts Minecraft's player at its spawn point: Killcraft's data pack keeps that
             // where the player last stood, so a death is a short move. See McSave.)
-            InputForward.Frame(controlled != null && puppet && !paused && !mcPaused, screenOpen, Screen.width, Screen.height);
+            InputForward.Frame(controlled != null && puppet && !paused && !McCommand.Busy, screenOpen, Screen.width, Screen.height);
             HudHider.Frame(controlled != null && puppet, nm);
             Combat.Frame(alive && inGame && mcInWorld && !mcDisabled, nm);
             while (Link.PopEvent(out McEvent e))
@@ -351,48 +352,30 @@ namespace Killcraft
         private float stepTimer, stepLog, inWorldFor;
         private bool haveWaypoint, everPuppet;
         private const float TeleportUnits = 8f;
-        // ULTRAKILL's pause pauses Minecraft too (its mobs, TNT, ...): SkyCraft opens Minecraft's own
-        // pause screen, which stops a singleplayer world, and Esc closes it again on unpausing.
-        // Minecraft takes a few frames to open or close it; until it's seen shut, Minecraft counts as
-        // paused (its screen is hidden and isn't the player's).
-        private bool mcPaused, mcPauseClosing;
-        private float mcPauseTimer;
-        private const ushort SdlEscape = 41;
+        // ULTRAKILL's pause freezes Minecraft's world too (its mobs, TNT, ...). SkyCraft makes no
+        // Minecraft screen pause the game while it's linked, so it's Minecraft's /tick freeze, typed
+        // in (McCommand) while Minecraft's HUD is hidden behind ULTRAKILL's pause menu. Around it the
+        // data pack turns command messages off and back on (killcraft:mute/unmute, see McSave), so
+        // pausing doesn't leave "game frozen / running normally" in the chat.
+        private bool mcFrozen;
 
-        private void PauseMinecraft(bool pause)
+        private void FreezeMinecraft(bool freeze)
         {
-            if (pause)
+            if (freeze != mcFrozen && haveMc && mcInWorld)
             {
-                if (!mcPaused && !screenOpen)
+                mcFrozen = freeze;
+                if (freeze)
                 {
-                    Link.PushInput(Proto.InOpenMenu);
-                    mcPaused = true;
+                    McCommand.Run("function killcraft:mute");
+                    McCommand.Run("tick freeze");
                 }
-                mcPauseClosing = false;
-                return;
+                else
+                {
+                    McCommand.Run("tick unfreeze");
+                    McCommand.Run("function killcraft:unmute");
+                }
             }
-            if (!mcPaused)
-            {
-                return;
-            }
-            if (!mcPauseClosing)
-            {
-                mcPauseClosing = true;
-                mcPauseTimer = 0f;
-            }
-            float before = mcPauseTimer;
-            mcPauseTimer += Time.unscaledDeltaTime;
-            // Esc now and every 0.3 s while the screen is (still, or only just) open.
-            if (screenOpen && (before == 0f || (int)(before / 0.3f) != (int)(mcPauseTimer / 0.3f)))
-            {
-                Link.PushInput(Proto.InKey, SdlEscape, 1);
-                Link.PushInput(Proto.InKey, SdlEscape, 0);
-            }
-            if ((!screenOpen && mcPauseTimer > 0.3f) || mcPauseTimer > 2f)
-            {
-                mcPaused = false;
-                mcPauseClosing = false;
-            }
+            McCommand.Frame(haveMc && mcInWorld, screenOpen);
         }
         private double wpX, wpY, wpZ, wpFromX, wpFromY, wpFromZ;
 
@@ -504,7 +487,7 @@ namespace Killcraft
             {
                 WorldRender.DebugCycle();
             }
-            Overlay.Frame(haveMc && mcInWorld && controlled != null && !mcPaused);
+            Overlay.Frame(haveMc && mcInWorld && controlled != null && !mcFrozen && !McCommand.Busy);
             WorldRender.Frame(haveMc && mcInWorld && inGame);
             if (controlled == null || controlled.cc == null)
             {

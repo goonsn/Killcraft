@@ -24,6 +24,7 @@ namespace Killcraft
         internal static ConfigEntry<bool> FreshWorld;
         internal static ConfigEntry<string> ToggleKey;
         internal static ConfigEntry<bool> MobsFightEnemies;
+        internal static ConfigEntry<bool> AlwaysThorns;
 
         private void Awake()
         {
@@ -52,6 +53,8 @@ namespace Killcraft
             MobsFightEnemies = Config.Bind("Minecraft", "MobsFightEnemies", true,
                 "Minecraft mobs (spawn eggs: zombies, skeletons, iron golems, wolves, creepers, ...) go after ULTRAKILL's enemies near them, " +
                 "and their hits hurt the enemies. Applied when Minecraft starts.");
+            AlwaysThorns = Config.Bind("Minecraft", "AlwaysThorns", true,
+                "Thorns armour hits back every time an enemy hurts you (Minecraft's own: 15% a level). Applied when Minecraft starts.");
             ToggleKey = Config.Bind("Controls", "ToggleMinecraft", "F9",
                 "Key that turns Minecraft off (V1 is plain ULTRAKILL again; Minecraft's player waits) and back on. A Unity Input System key name, e.g. F9, F10, Backquote.");
             Diagnostics = Config.Bind("Debug", "Diagnostics", false, "Extra logging (collision sources, timings).");

@@ -102,12 +102,18 @@ namespace Killcraft
 
             if (mouse != null)
             {
-                if (!screenOpen && mouse.leftButton.wasPressedThisFrame)
+                // While the right button is held (a raised shield, a drawn bow, eating) a click doesn't
+                // attack, as in Minecraft: SkyCraft's own hitting of ULTRAKILL's enemies doesn't check.
+                bool usingItem = !screenOpen && mouse.rightButton.isPressed;
+                if (!screenOpen && !usingItem && mouse.leftButton.wasPressedThisFrame)
                 {
                     LastAttackPress = Time.unscaledTime;
                     Combat.SwingParry();
                 }
-                Button(mouse.leftButton, 1);
+                if (!(usingItem && mouse.leftButton.wasPressedThisFrame))
+                {
+                    Button(mouse.leftButton, 1);
+                }
                 Button(mouse.rightButton, 3);
                 Button(mouse.middleButton, 2);
                 Button(mouse.backButton, 4);

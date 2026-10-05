@@ -1,15 +1,11 @@
 using System.Collections.Generic;
-using System.Reflection;
-using HarmonyLib;
-using ULTRAKILL.Cheats;
 using UnityEngine;
 
 namespace Killcraft
 {
     // While V1 is in Minecraft's Nether (high above the level, see Coords) ULTRAKILL looks like it:
     // Minecraft's dark red Nether fog and sky, and the camera stops short of the level far below. The
-    // enemies left in the level don't come after V1 (ULTRAKILL's Blind Enemies cheat, switched on for
-    // the trip without touching the player's own cheat setting).
+    // enemies left in the level don't come after V1 (NetherWorld brings the Nether's own).
     internal static class Nether
     {
         private static readonly Color FogColor = new Color(0.2f, 0.03f, 0.03f);
@@ -25,8 +21,7 @@ namespace Killcraft
         private static readonly List<(Camera Cam, CameraClearFlags Flags, Color Background, float Far)> savedCams =
             new List<(Camera, CameraClearFlags, Color, float)>();
 
-        private static readonly FieldInfo blindInstance = AccessTools.Field(typeof(BlindEnemies), "_lastInstance");
-        private static object blindBefore;
+        private static readonly List<EnemyIdentifier> ignoring = new List<EnemyIdentifier>();
 
         public static void Frame(bool inNether, CameraController cc)
         {
@@ -131,14 +126,15 @@ namespace Killcraft
                     savedCams.Add((v, v.clearFlags, v.backgroundColor, v.farClipPlane));
                 }
             }
-            try
+            // The level's enemies (only those: the Nether's own come after V1) ignore V1 meanwhile.
+            ignoring.Clear();
+            foreach (EnemyIdentifier eid in Object.FindObjectsOfType<EnemyIdentifier>())
             {
-                blindBefore = blindInstance?.GetValue(null);
-                new BlindEnemies().Enable(null);
-            }
-            catch (System.Exception e)
-            {
-                Plugin.Log.LogWarning($"Nether: couldn't blind the level's enemies: {e.Message}");
+                if (eid != null && !eid.ignorePlayer)
+                {
+                    eid.ignorePlayer = true;
+                    ignoring.Add(eid);
+                }
             }
         }
 
@@ -162,15 +158,14 @@ namespace Killcraft
                 }
             }
             savedCams.Clear();
-            try
+            foreach (EnemyIdentifier eid in ignoring)
             {
-                blindInstance?.SetValue(null, blindBefore);
+                if (eid != null)
+                {
+                    eid.ignorePlayer = false;
+                }
             }
-            catch (System.Exception e)
-            {
-                Plugin.Log.LogWarning($"Nether: couldn't un-blind the level's enemies: {e.Message}");
-            }
-            blindBefore = null;
+            ignoring.Clear();
         }
     }
 }

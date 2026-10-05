@@ -11,6 +11,11 @@ namespace Killcraft
     internal static class Combat
     {
         private const float RangeBlocks = 64f;
+        private const float PickupRangeBlocks = 24f;
+        private const int MaxLooseArrows = 48;
+        public const float PickupPoke = 13.25f;
+        private static readonly List<(uint Id, Vector3 Pos)> loose = new List<(uint, Vector3)>();
+        private static readonly byte[] looseName = Encoding.UTF8.GetBytes(WorldRender.LooseArrowName);
         private static readonly Dictionary<EnemyIdentifier, uint> ids = new Dictionary<EnemyIdentifier, uint>();
         private static readonly Dictionary<uint, EnemyIdentifier> byId = new Dictionary<uint, EnemyIdentifier>();
         private static readonly Dictionary<uint, float> maxHealth = new Dictionary<uint, float>();
@@ -81,6 +86,25 @@ namespace Killcraft
                         HealthFrac = Mathf.Clamp01(hp / max),
                         Level = 1,
                         Name = name,
+                    };
+                }
+                // Arrows on corpses and the floor, to be picked up (see WorldRender.LooseArrows).
+                WorldRender.LooseArrows(loose, p, PickupRangeBlocks * Coords.U, Math.Min(MaxLooseArrows, Proto.MaxActors - count));
+                foreach (var (id, at) in loose)
+                {
+                    Coords.ToMc(at - Vector3.up * (0.125f * Coords.U), out double x, out double y, out double z);
+                    records[count++] = new ActorRecord
+                    {
+                        FormId = id,
+                        Flags = 0,
+                        X = (float)x,
+                        Y = (float)y,
+                        Z = (float)z,
+                        Width = 0.25f,
+                        Height = 0.25f,
+                        HealthFrac = 1f,
+                        Level = 1,
+                        Name = looseName,
                     };
                 }
             }
@@ -210,6 +234,16 @@ namespace Killcraft
             switch (e.Type)
             {
                 case Proto.EvHitActor:
+                    // A loose arrow's stand-in, poked by the data pack (its own damage amount, not a
+                    // sword sweeping through it): a player picked the arrow up.
+                    if (WorldRender.IsLooseArrow(e.FormId))
+                    {
+                        if (Math.Abs(e.A - PickupPoke) < 0.01f)
+                        {
+                            WorldRender.PickedUp(e.FormId);
+                        }
+                        break;
+                    }
                     if (byId.TryGetValue(e.FormId, out EnemyIdentifier eid) && eid != null && !eid.dead)
                     {
                         Hit(eid, e);

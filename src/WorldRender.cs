@@ -940,7 +940,11 @@ namespace Killcraft
                             Array.Copy(e.Uv, 4, arrowBack, 0, 4);
                             haveArrowUv = true;
                         }
-                        Arrow(new Vector3(e.X, e.Y, e.Z), d, e.Uv, e.Kind == 3);
+                        var at = new Vector3(e.X, e.Y, e.Z);
+                        if (PinnedArrow(e.Id, ref at, ref d))
+                        {
+                            Arrow(at, d, e.Uv, e.Kind == 3);
+                        }
                         break;
                     case 2:  // item: Minecraft's item model (the sprite, 1/16 thick) turning about the vertical
                         {
@@ -967,6 +971,7 @@ namespace Killcraft
                         break;
                 }
             }
+            ForgetUnseenPins();
             dynamicMesh.Clear();
             dynamicMesh.SetVertices(dv);
             dynamicMesh.SetUVs(0, duv);
@@ -1180,6 +1185,114 @@ namespace Killcraft
             outlineMesh.RecalculateBounds();
         }
 
+        // ---- arrows stuck in ULTRAKILL's moving geometry ------------------------------------------
+        //
+        // Minecraft keeps a stuck arrow where it hit; ULTRAKILL's doors and platforms move on. An arrow
+        // that has stopped is pinned to the ULTRAKILL object it's in and drawn moving with it, for as
+        // long as Minecraft keeps it there (when Minecraft drops it, it's drawn falling as usual).
+
+        private sealed class Pin
+        {
+            public Vector3 McPos;
+            public float Still;
+            public bool Tried;
+            public Transform Target;
+            public Vector3 LocalPos, LocalDir;
+            public int Seen;
+        }
+
+        private static readonly Dictionary<uint, Pin> pins = new Dictionary<uint, Pin>();
+        private static readonly List<uint> unpinned = new List<uint>();
+        private static int pinFrame;
+        private const int GeometryMask = (1 << 6) | (1 << 7) | (1 << 8) | (1 << 24) | (1 << 26);
+
+        // p: the arrow's position in Minecraft; d: its direction, in Minecraft's axes. Both are replaced
+        // by where the object it's pinned to has taken it. False: that object is switched off (a door
+        // that vanishes), and the arrow with it.
+        private static bool PinnedArrow(uint id, ref Vector3 p, ref Vector3 d)
+        {
+            if (!pins.TryGetValue(id, out Pin pin))
+            {
+                pins[id] = pin = new Pin { McPos = p };
+            }
+            pin.Seen = pinFrame;
+            if ((p - pin.McPos).sqrMagnitude > 1e-6f)
+            {
+                // Moving (flying, or Minecraft dropped it): not pinned.
+                pin.McPos = p;
+                pin.Still = 0f;
+                pin.Tried = false;
+                pin.Target = null;
+                return true;
+            }
+            pin.Still += Time.deltaTime;
+            if (!pin.Tried && pin.Still > 0.2f)
+            {
+                pin.Tried = true;
+                Vector3 at = Mc(p), dir = Coords.DirToUnity(d.x, d.y, d.z).normalized;
+                float u = Coords.U;
+                Collider hit = null;
+                float nearest = float.MaxValue;
+                foreach (RaycastHit h in Physics.RaycastAll(at - dir * u, dir, 2f * u, GeometryMask, QueryTriggerInteraction.Ignore))
+                {
+                    if (!IsOurs(h.collider) && h.distance < nearest)
+                    {
+                        nearest = h.distance;
+                        hit = h.collider;
+                    }
+                }
+                if (hit == null)
+                {
+                    foreach (Collider c in Physics.OverlapSphere(at, 0.3f * u, GeometryMask, QueryTriggerInteraction.Ignore))
+                    {
+                        if (!IsOurs(c))
+                        {
+                            hit = c;
+                            break;
+                        }
+                    }
+                }
+                if (hit != null)
+                {
+                    pin.Target = hit.transform;
+                    pin.LocalPos = hit.transform.InverseTransformPoint(at);
+                    pin.LocalDir = hit.transform.InverseTransformDirection(dir);
+                }
+            }
+            if (pin.Target == null)
+            {
+                return true;
+            }
+            if (!pin.Target.gameObject.activeInHierarchy)
+            {
+                return false;
+            }
+            Vector3 now = pin.Target.TransformPoint(pin.LocalPos);
+            Vector3 nowDir = pin.Target.TransformDirection(pin.LocalDir);
+            Coords.ToMc(now, out double x, out double y, out double z);
+            p = new Vector3((float)x, (float)y, (float)z);
+            d = new Vector3(nowDir.x, nowDir.y, -nowDir.z);
+            return true;
+        }
+
+        // Arrows Minecraft no longer shows (picked up, gone) are forgotten.
+        private static void ForgetUnseenPins()
+        {
+            unpinned.Clear();
+            foreach (var kv in pins)
+            {
+                if (kv.Value.Seen != pinFrame)
+                {
+                    unpinned.Add(kv.Key);
+                }
+            }
+            foreach (uint id in unpinned)
+            {
+                pins.Remove(id);
+            }
+            pinFrame++;
+        }
+
         // ---- arrows stuck in ULTRAKILL enemies ------------------------------------------------------
 
         // Minecraft removes arrows that hit a creature; this pins one to the enemy's nearest body part so
@@ -1234,23 +1347,59 @@ namespace Killcraft
             }
         }
 
-        // An enemy's arrows go when it dies, as in Minecraft: its gibs can leave the body part an
-        // arrow is pinned to hanging in the air.
+        // A dead enemy's arrows stay in its body, moving with it, for as long as the body is drawn
+        // where they are. Once it isn't (blown to gibs, the body part gone, a corpse swapped out),
+        // they drop out instead of hanging in the air.
+        private static float corpseCheck;
+
+        private static bool OnVisibleBody(GameObject arrow, EnemyIdentifier eid)
+        {
+            Transform part = arrow.transform.parent;
+            if (eid == null || part == null || !part.gameObject.activeInHierarchy)
+            {
+                return false;
+            }
+            Vector3 at = arrow.transform.position;
+            float margin = 0.25f * Coords.U;
+            foreach (Renderer r in eid.GetComponentsInChildren<Renderer>())
+            {
+                if (r == null || !r.enabled || !r.gameObject.activeInHierarchy || r.gameObject.name == "Minecraft arrow"
+                    || !(r is SkinnedMeshRenderer || r is MeshRenderer))
+                {
+                    continue;
+                }
+                Bounds b = r.bounds;
+                b.Expand(margin);
+                if (b.Contains(at))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         private static void PruneStuckArrows()
         {
+            corpseCheck -= Time.deltaTime;
+            bool checkCorpses = corpseCheck <= 0f;
+            if (checkCorpses)
+            {
+                corpseCheck = 0.2f;
+            }
             var node = stuckArrows.First;
             while (node != null)
             {
                 var next = node.Next;
                 (GameObject arrow, EnemyIdentifier eid) = node.Value;
-                if (arrow == null || eid == null || eid.dead)
+                bool gone = arrow == null || eid == null || (eid.dead && checkCorpses && !OnVisibleBody(arrow, eid));
+                if (gone)
                 {
-                    // Its enemy died: the arrow drops out (a body flying apart or vanishing would
-                    // otherwise leave it hanging in the air).
+                    // Off the body: the arrow drops out.
                     if (arrow != null)
                     {
                         arrow.transform.SetParent(null, true);
-                        fallingArrows.Add(new FallingArrow { Arrow = arrow, Life = 8f });
+                        // (A minute on the floor, as Minecraft's arrows.)
+                        fallingArrows.Add(new FallingArrow { Arrow = arrow, Life = 60f });
                     }
                     stuckArrows.Remove(node);
                 }
@@ -1287,6 +1436,81 @@ namespace Killcraft
                     }
                 }
                 fallingArrows[i] = f;
+            }
+        }
+
+        // Arrows on a corpse or on the floor are Killcraft's drawing only (Minecraft removed them when
+        // they hit the enemy's stand-in): each is also a tiny stand-in named "Killcraft arrow" (Combat),
+        // which Killcraft's data pack turns into an arrow for a player who walks up to it, then pokes so
+        // Killcraft hears it was picked up.
+        public const string LooseArrowName = "Killcraft arrow";
+        private const uint FirstLooseId = 0x40000000;
+        private static readonly Dictionary<GameObject, uint> looseIds = new Dictionary<GameObject, uint>();
+        private static readonly List<GameObject> looseGone = new List<GameObject>();
+        private static uint nextLooseId = FirstLooseId;
+
+        public static bool IsLooseArrow(uint id) => id >= FirstLooseId;
+
+        public static void LooseArrows(List<(uint Id, Vector3 Pos)> into, Vector3 near, float range, int max)
+        {
+            into.Clear();
+            foreach (var (arrow, eid) in stuckArrows)
+            {
+                if (arrow != null && eid != null && eid.dead)
+                {
+                    AddLoose(arrow, into, near, range);
+                }
+            }
+            foreach (FallingArrow f in fallingArrows)
+            {
+                if (f.Arrow != null && f.Landed)
+                {
+                    AddLoose(f.Arrow, into, near, range);
+                }
+            }
+            if (into.Count > max)
+            {
+                into.Sort((a, b) => (a.Pos - near).sqrMagnitude.CompareTo((b.Pos - near).sqrMagnitude));
+                into.RemoveRange(max, into.Count - max);
+            }
+            looseGone.Clear();
+            foreach (GameObject key in looseIds.Keys)
+            {
+                if (key == null)
+                {
+                    looseGone.Add(key);
+                }
+            }
+            foreach (GameObject key in looseGone)
+            {
+                looseIds.Remove(key);
+            }
+        }
+
+        private static void AddLoose(GameObject arrow, List<(uint Id, Vector3 Pos)> into, Vector3 near, float range)
+        {
+            Vector3 at = arrow.transform.position;
+            if ((at - near).sqrMagnitude > range * range)
+            {
+                return;
+            }
+            if (!looseIds.TryGetValue(arrow, out uint id))
+            {
+                looseIds[arrow] = id = nextLooseId++;
+            }
+            into.Add((id, at));
+        }
+
+        public static void PickedUp(uint id)
+        {
+            foreach (var kv in looseIds)
+            {
+                if (kv.Value == id && kv.Key != null)
+                {
+                    renderers.Remove(kv.Key.GetComponent<MeshRenderer>());
+                    UnityEngine.Object.Destroy(kv.Key);
+                    break;
+                }
             }
         }
 

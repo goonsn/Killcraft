@@ -7,7 +7,7 @@ using UnityEngine.SceneManagement;
 
 namespace Killcraft
 {
-    [BepInPlugin("dev.killcraft", "Killcraft", "0.1.5")]
+    [BepInPlugin("dev.killcraft", "Killcraft", "0.1.5.5")]
     public sealed class Plugin : BaseUnityPlugin
     {
         internal static ManualLogSource Log;

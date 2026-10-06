@@ -448,6 +448,7 @@ namespace Killcraft
             Patches.OwnsPlayer = controlled != null;
             Lockout.Frame(controlled != null, ultrakillDrives);
             HeldItems.Frame(controlled != null, nm != null ? nm.cc : null);
+            HurtZones.Frame(nm, controlled != null && nm != null && nm.rb != null && nm.rb.isKinematic && inGame && !loading);
             // (Also when ULTRAKILL has V1 — toggled off, dead: Minecraft's mobs and TNT carry on otherwise.)
             FreezeMinecraft(paused && inGame);
             // The chat McCommand opens isn't a Minecraft screen the player has open: Esc still belongs to

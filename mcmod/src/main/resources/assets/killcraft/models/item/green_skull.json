@@ -1,0 +1,42 @@
+{
+  "parent": "minecraft:item/generated",
+  "textures": {
+    "layer0": "killcraft:item/green_skull"
+  },
+  "display": {
+    "firstperson_righthand": {
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "translation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        0,
+        0,
+        0
+      ]
+    },
+    "firstperson_lefthand": {
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "translation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        0,
+        0,
+        0
+      ]
+    }
+  }
+}

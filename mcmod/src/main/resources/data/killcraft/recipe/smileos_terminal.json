@@ -1,0 +1,14 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "key": {
+    "I": "minecraft:iron_ingot",
+    "G": "minecraft:glass_pane",
+    "R": "minecraft:redstone"
+  },
+  "pattern": [
+    "III",
+    "IGI",
+    "IRI"
+  ],
+  "result": { "id": "killcraft:smileos_terminal" }
+}

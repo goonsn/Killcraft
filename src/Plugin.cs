@@ -7,7 +7,7 @@ using UnityEngine.SceneManagement;
 
 namespace Killcraft
 {
-    [BepInPlugin("dev.killcraft", "Killcraft", "0.1.6")]
+    [BepInPlugin("dev.killcraft", "Killcraft", "1.0.0")]
     public sealed class Plugin : BaseUnityPlugin
     {
         internal static ManualLogSource Log;
@@ -27,6 +27,13 @@ namespace Killcraft
         internal static ConfigEntry<bool> AlwaysThorns;
         internal static ConfigEntry<bool> MobsAttackYouInLevels;
         internal static ConfigEntry<int> NetherEnemies;
+        internal static ConfigEntry<bool> NetherMiniBosses;
+        internal static ConfigEntry<string> DiscordAppId;
+        // Killcraft's application on Discord's developer portal (public; not a secret).
+        internal const string KillcraftDiscordApp = "1557101551343112355";
+        internal static ConfigEntry<bool> DamageByDifficulty;
+        internal static ConfigEntry<float> BossDamage;
+        internal static ConfigEntry<bool> BossesPierceArmour;
 
         private void Awake()
         {
@@ -37,6 +44,12 @@ namespace Killcraft
                 "ULTRAKILL damage per point of Minecraft damage dealt to an enemy (a diamond sword hit is 7; a Filth has 0.5 health, a Swordsmachine 30).");
             DamageToMinecraft = Config.Bind("Combat", "DamageToMinecraft", 1.0f,
                 "Multiplier on ULTRAKILL damage before it is sent to Minecraft, which divides it by 5 (ULTRAKILL's 100 health = Minecraft's 20).");
+            DamageByDifficulty = Config.Bind("Combat", "DamageByDifficulty", true,
+                "Enemies hit harder on harder ULTRAKILL difficulties: Harmless x0.5, Lenient x0.75, Standard x1, Violent x1.5, Brutal x2, UKMD x2.5.");
+            BossDamage = Config.Bind("Combat", "BossDamage", 1.5f,
+                "Extra multiplier on the damage bosses (V2, Gabriel, the Primes, ...) do to you.");
+            BossesPierceArmour = Config.Bind("Combat", "BossesPierceArmour", true,
+                "Bosses' hits go through Minecraft armour (Protection enchantments still count). A raised shield still blocks them.");
             StartMinecraft = Config.Bind("Minecraft", "StartWithUltrakill", true,
                 "Start Minecraft (hidden) when ULTRAKILL starts. Off: start the SkyCraft Prism instance yourself.");
             LauncherPath = Config.Bind("Minecraft", "Launcher", "",
@@ -62,6 +75,11 @@ namespace Killcraft
                 "and only fight ULTRAKILL's enemies; in the Nether they always attack you. Applied when Minecraft starts.");
             NetherEnemies = Config.Bind("Minecraft", "NetherEnemies", 6,
                 "How many ULTRAKILL enemies are around you at a time in the Nether (filth, strays, drones, schisms, soldiers, ... no bosses). 0: none.");
+            NetherMiniBosses = Config.Bind("Minecraft", "NetherMiniBosses", true,
+                "Now and then one of ULTRAKILL's mini-bosses turns up in the Nether too (a Swordsmachine, Cerberus, Mindflayer, Hideous Mass, " +
+                "Ferryman, Gutterman or Guttertank), one at a time, with a boss bar.");
+            DiscordAppId = Config.Bind("Discord", "ApplicationId", "",
+                "Your Discord status while playing. Empty: Killcraft's. Or another Discord application's id; skycraft: SkyCraft's own status; 0: none. Applied when Minecraft starts.");
             ToggleKey = Config.Bind("Controls", "ToggleMinecraft", "F9",
                 "Key that turns Minecraft off (V1 is plain ULTRAKILL again; Minecraft's player waits) and back on. A Unity Input System key name, e.g. F9, F10, Backquote.");
             Diagnostics = Config.Bind("Debug", "Diagnostics", false, "Extra logging (collision sources, timings).");

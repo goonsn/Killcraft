@@ -29,11 +29,19 @@
     <Reference Include="UnityEngine.UI" HintPath="$(Managed)\UnityEngine.UI.dll" Private="false" />
     <Reference Include="UnityEngine.UIModule" HintPath="$(Managed)\UnityEngine.UIModule.dll" Private="false" />
     <Reference Include="UnityEngine.AIModule" HintPath="$(Managed)\UnityEngine.AIModule.dll" Private="false" />
+    <Reference Include="Unity.Addressables" HintPath="$(Managed)\Unity.Addressables.dll" Private="false" />
+    <Reference Include="Unity.ResourceManager" HintPath="$(Managed)\Unity.ResourceManager.dll" Private="false" />
+    <Reference Include="UnityEngine.AnimationModule" HintPath="$(Managed)\UnityEngine.AnimationModule.dll" Private="false" />
     <Reference Include="Unity.InputSystem" HintPath="$(Managed)\Unity.InputSystem.dll" Private="false" />
   </ItemGroup>
 
   <Target Name="Deploy" AfterTargets="Build">
     <MakeDir Directories="$(PluginDir)" />
     <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(PluginDir)" />
+    <!-- Killcraft's Minecraft mod (mcmod, built with Gradle), shipped next to the plugin. -->
+    <ItemGroup>
+      <ModJar Include="mcmod\build\libs\killcraft-mc-*.jar" />
+    </ItemGroup>
+    <Copy SourceFiles="@(ModJar)" DestinationFiles="$(PluginDir)\killcraft-mc.jar" Condition="'@(ModJar)' != ''" />
   </Target>
 </Project>

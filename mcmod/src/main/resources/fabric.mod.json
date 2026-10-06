@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "killcraft",
+  "version": "${version}",
+  "name": "Killcraft",
+  "description": "Minecraft's side of Killcraft (Minecraft inside ULTRAKILL): the Potion of ULTRAKILL, SMILEOS terminals and more.",
+  "authors": ["goonsn"],
+  "contributors": ["alfr0762 (the SMILEOS terminal blocks idea)"],
+  "contact": {
+    "sources": "https://github.com/goonsn/Killcraft"
+  },
+  "license": "MIT",
+  "environment": "*",
+  "entrypoints": {
+    "main": ["dev.killcraft.mc.Killcraft"],
+    "client": ["dev.killcraft.mc.KillcraftClient"]
+  },
+  "mixins": ["killcraft.mixins.json"],
+  "depends": {
+    "fabricloader": ">=0.19.5",
+    "minecraft": "~26.3",
+    "java": ">=25",
+    "fabric-api": "*",
+    "skycraft": "*"
+  }
+}

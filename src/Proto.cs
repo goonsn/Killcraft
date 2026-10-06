@@ -67,6 +67,12 @@ namespace Killcraft
         public const int EventRingEntries = 512;
         public const long EventBytes = 32;
         public const uint EvHitActor = 1, EvPlayerDied = 2, EvExplosion = 3, EvArrowStuck = 4, EvSkillUse = 5;
+        // From Killcraft's Minecraft mod (mcmod's Killcraft.EV_*): the ULTRAKILL effect is on; a Nether
+        // portal: stop it at once; a SMILEOS terminal at A, B, C (block), facing D.
+        // The skull in Minecraft's hand (ULTRAKILL's ItemType, or 0).
+        public const uint EvKcUltrakillMoves = 100, EvKcUltrakillStop = 101, EvKcTerminal = 102, EvKcHeldSelected = 103,
+            EvKcFollowerHurt = 104,
+            EvKcDimension = 105;  // which world Minecraft's player is really in (A: 1 the Nether)  // Minecraft off: what would have hurt Minecraft's following player (A)
         public const uint HitCritical = 1, HitProjectile = 2, HitSweep = 4, HitFire = 8;
 
         // Collision ring (host -> MC)

@@ -3,7 +3,7 @@
 
 **Minecraft inside ULTRAKILL.** You play as a Minecraft player in ULTRAKILL's levels: Minecraft's movement, health, hunger, hotbar, inventory, swords, bows, shields, armour, TNT and block building, against ULTRAKILL's enemies in ULTRAKILL's levels.
 
-It works like [SkyCraft](https://github.com/chasmlol/SkyCraft) (Minecraft inside Skyrim), and is built on it: a real Minecraft runs hidden in the background with SkyCraft's mod, and ULTRAKILL shows Minecraft's player, HUD, blocks and items in its own world.
+It works like [SkyCraft](https://github.com/chasmlol/SkyCraft) (Minecraft inside Skyrim), and is built on it: a real Minecraft runs hidden in the background with SkyCraft's mod and Killcraft's own Minecraft mod, and ULTRAKILL shows Minecraft's player, HUD, blocks and items in its own world.
 
 ## What works
 
@@ -14,7 +14,16 @@ It works like [SkyCraft](https://github.com/chasmlol/SkyCraft) (Minecraft inside
 - Blocks you place show up in ULTRAKILL with Minecraft's textures, block enemies and their shots, and light the level (torches, lanterns).
 - Arrows stick in walls, doors (and move with them) and enemies, stay in their corpses, and can be picked up again from corpses and the floor. Dropped items lie on the floor, and lit TNT flashes and explodes with an ULTRAKILL explosion.
 - Minecraft mobs fight on your side: spawn zombies, skeletons, iron golems, wolves, creepers, ... with spawn eggs and they go after ULTRAKILL's enemies near them. In the levels they leave you alone.
-- **The Nether:** build a Nether portal anywhere in a level (`/give @s minecraft:obsidian 14`, then flint and steel) and stand in it for 3 seconds. You go to Minecraft's real Nether, with its own part for every level, and its mobs attack you there, along with ULTRAKILL enemies that keep turning up around you (filth, strays, drones, schisms, soldiers, and now and then a cerberus, swordsmachine or mindflayer). ULTRAKILL shows it around V1, with Minecraft's Nether fog. Any Nether portal brings you back to the portal you came through, and dying there respawns you in the level.
+- **The Nether:** build a Nether portal anywhere in a level (`/give @s minecraft:obsidian 14`, then flint and steel) and stand in it for 3 seconds. You go to Minecraft's real Nether, with its own part for every level, and its mobs attack you there, along with ULTRAKILL enemies that keep turning up around you (filth, strays, drones, schisms, soldiers, streetcleaners) and climb its blocks after you. Now and then a mini-boss turns up too, with a boss bar (a swordsmachine, cerberus, guttertank, gutterman, mindflayer, hideous mass or ferryman). ULTRAKILL shows it around V1, with Minecraft's Nether fog. Any Nether portal brings you back to the portal you came through, and dying there respawns you in the level.
+- **ULTRAKILL's weapons tear up the Nether:** explosions blow holes in it (a rocket shot out of the air with the revolver is a big one, and sets fires), charged revolver shots and the railcannon bore tunnels, and the red shotgun's chainsaw mines through blocks (they drop).
+- **F9 (plain ULTRAKILL) works everywhere, the Nether included:** Minecraft's player comes along with V1 (through Nether portals too), what would hurt it (mobs, lava, fire) hurts V1 instead, and ULTRAKILL's weapons (beams, pellets, nails, saws, explosions, punches, the chainsaw) hurt Minecraft's mobs, which drop their loot. Minecraft's sound is off meanwhile.
+- **Potion of ULTRAKILL** (Killcraft's Minecraft mod): drink it and you move like V1 (dash, slide, wall jumps, ULTRAKILL's speed) for two minutes, while keeping Minecraft's hotbar, items and health. Craft it from a glass bottle, sugar, a feather and redstone, find it in the creative menu's Killcraft tab, or `/give @s killcraft:ultrakill_potion`.
+- **SMILEOS shops as blocks** (Killcraft's Minecraft mod): place a SMILEOS Shop (iron ingots around a glass pane with redstone below, or `/give @s killcraft:smileos_terminal`) and ULTRAKILL's real shop stands there, to buy and change weapons anywhere.
+- **ULTRAKILL's skulls in your inventory:** picked-up skulls go into Minecraft's hotbar (blue, red and green, carry as many as you like) and the one you select is in your hand, to put in its altar.
+- Third person with F5 (behind and in front, as in Minecraft), with the camera stopping at walls and Minecraft's player shown.
+- Your Discord status shows Killcraft while you play.
+- Bosses hit harder the higher ULTRAKILL's difficulty, and go through armour (see the settings).
+- Jump pads launch you (the Cybergrind's too), and crouching stops you at edges, so you can bridge.
 - Shields block ULTRAKILL's attacks, thorns armour hurts ULTRAKILL's enemies, and a swing parries projectiles (Stray energy balls, ...) like V1's punch.
 - SMILEOS terminals and shops can be clicked.
 - Potion effects work on the Minecraft player (speed, jump boost, strength, resistance, regeneration, ...).
@@ -44,6 +53,7 @@ Minecraft's own controls (WASD, space, shift, mouse buttons, 1-9, E for the inve
 | Key | |
 |---|---|
 | **F9** | Turn Minecraft off (plain ULTRAKILL with your guns) and back on |
+| **F5** | Third person (behind you, then in front, then back to first person) |
 | **O** | Minecraft's menu (options, ...) |
 | **Esc** | ULTRAKILL's pause menu, which pauses Minecraft too and mutes its sound (or closes an open Minecraft screen) |
 
@@ -58,14 +68,19 @@ Minecraft's own controls (WASD, space, shift, mouse buttons, 1-9, E for the inve
 | `MobsFightEnemies` | `true` | Minecraft mobs go after ULTRAKILL's enemies near them |
 | `MobsAttackYouInLevels` | `false` | Minecraft mobs attack you in ULTRAKILL's levels too (off: they're on your side there; in the Nether they always attack you) |
 | `NetherEnemies` | `6` | How many ULTRAKILL enemies are around you at a time in the Nether (0: none) |
+| `NetherMiniBosses` | `true` | Now and then a mini-boss turns up in the Nether, one at a time |
 | `AlwaysThorns` | `true` | Thorns armour hits back every time an enemy hurts you (Minecraft's own: 15% a level) |
 | `TntFuseTicks` | `40` | How long lit TNT burns (20 = one second; Minecraft's own is 80) |
 | `DigIntoLevels` | `false` | Let TNT and pickaxes dig into ULTRAKILL's level geometry (the holes don't show in ULTRAKILL) |
 | `DamageToUltrakill` | `0.3` | ULTRAKILL damage per point of Minecraft damage you deal |
 | `DamageToMinecraft` | `1.0` | Multiplier on the damage enemies do to you |
+| `DamageByDifficulty` | `true` | Enemies hit harder on harder difficulties (Harmless x0.5 up to UKMD x2.5) |
+| `BossDamage` | `1.5` | Extra multiplier on the damage bosses (V2, Gabriel, the Primes, ...) do to you |
+| `BossesPierceArmour` | `true` | Bosses' hits go through armour (Protection enchantments still count, a raised shield still blocks) |
 | `BlockBrightness` | `1.0` | How bright Minecraft blocks are drawn (lower it in dark levels) |
 | `UnitsPerBlock` | `2` | ULTRAKILL units per Minecraft block (2 makes the Minecraft player about V1's height) |
 | `StartWithUltrakill` | `true` | Start Minecraft when ULTRAKILL starts |
+| `ApplicationId` | (empty) | Your Discord status: empty shows Killcraft ("Playing ULTRAKILL as a Minecraft player"), `skycraft` SkyCraft's own, `0` none |
 
 ## Known limits
 
@@ -73,14 +88,13 @@ Minecraft's own controls (WASD, space, shift, mouse buttons, 1-9, E for the inve
 - Blocks don't get ULTRAKILL's baked level lighting, so they can look bright in dark levels (see `BlockBrightness`).
 - Minecraft mobs and particles other than TNT, falling blocks and explosions are only partly shown.
 - ULTRAKILL's enemies only ever attack V1, not Minecraft mobs.
-- The level's own enemies wait in the level and ignore you while you're in the Nether. F9 doesn't work in the Nether, since ULTRAKILL's V1 would have nothing to stand on. You always arrive at height 70, in a small room dug out for the portal.
+- The level's own enemies wait in the level and ignore you while you're in the Nether. You always arrive at height 70, in a small room dug out for the portal.
+- ULTRAKILL's weapons only break blocks in the Nether (in the levels, Minecraft's blocks are your own builds).
 - Holding right click (a raised shield, a drawn bow, eating) stops left clicks attacking, as in Minecraft.
 - Mobs on your side in the levels don't fight back when you hit them, and don't fight each other (an iron golem leaves zombies alone).
 - Flint and steel and fire charges light ULTRAKILL's floors only from the side: aim at the bottom of a wall just above the floor, or at the side of a step (aiming straight down at a floor doesn't work). Minecraft blocks light as usual (netherrack burns forever). Enemies walking through fire or lava burn.
 - Minecraft only has the level's collision about 36 blocks around you: an ender pearl thrown further comes back to you.
 - Effects that only change how Minecraft looks (night vision, blindness, darkness, nausea, invisibility) don't show in ULTRAKILL, and invisibility doesn't hide you from its enemies.
-- No third person: F5 does nothing (ULTRAKILL's camera stays in V1's head).
-- Crouching doesn't stop you at edges (SkyCraft turns that off, since Minecraft's edge check only knows Minecraft blocks).
 - Zombies, skeletons and other mobs that burn in daylight don't catch fire at all (ULTRAKILL's levels are in Minecraft daylight).
 - Minecraft can't plan mob paths over ULTRAKILL's levels, so Killcraft walks fighting mobs straight at their enemy: they can't find their way around walls or up to other floors. The warden, piglins, hoglins and breezes aren't walked (only set on the enemy).
 - Items held by mobs (a skeleton's bow) can show white.
@@ -95,10 +109,20 @@ dotnet build -c Release
 
 If ULTRAKILL isn't in `C:\Program Files (x86)\Steam\steamapps\common\ULTRAKILL`, add `-p:GameDir="X:\path\to\ULTRAKILL"`. The build copies `Killcraft.dll` into `BepInEx\plugins\Killcraft\`.
 
-The code: `Link.cs`/`Proto.cs` speak SkyCraft's shared-memory protocol, `Host.cs` hands V1 to Minecraft and back, `Collision.cs` streams ULTRAKILL's level geometry to Minecraft, `Combat.cs` mirrors enemies and applies hits, `WorldRender.cs` draws Minecraft's blocks, items and entities, `Overlay.cs` shows Minecraft's HUD, `InputForward.cs` sends the keyboard and mouse to Minecraft, `Nether.cs` makes ULTRAKILL look like the Nether while you're there, `NetherWorld.cs` gives the Nether's terrain collision, a navmesh and ULTRAKILL enemies, `McAudio.cs` mutes Minecraft while paused, and `McSave.cs` prepares Minecraft's world (and writes Killcraft's data pack) before it starts.
+Killcraft's Minecraft mod (`mcmod/`, Fabric for Minecraft 26.3) needs Java 25 and SkyCraft's mod jar in `mcmod/libs/` (`skycraft-0.1.2.jar`, from SkyCraft's Minecraft bundle):
+
+```
+cd mcmod
+gradlew build
+```
+
+The Killcraft build copies `mcmod/build/libs/killcraft-mc-*.jar` next to `Killcraft.dll` as `killcraft-mc.jar`, and Killcraft puts it into Minecraft's mods folder when it starts.
+
+The code: `Link.cs`/`Proto.cs` speak SkyCraft's shared-memory protocol, `Host.cs` hands V1 to Minecraft and back, `Collision.cs` streams ULTRAKILL's level geometry to Minecraft, `Combat.cs` mirrors enemies and applies hits, `WorldRender.cs` draws Minecraft's blocks, items and entities, `Overlay.cs` shows Minecraft's HUD, `InputForward.cs` sends the keyboard and mouse to Minecraft, `Nether.cs` makes ULTRAKILL look like the Nether while you're there, `NetherWorld.cs` gives the Nether's terrain collision, a navmesh and ULTRAKILL enemies, `McAudio.cs` mutes Minecraft while paused, `McSave.cs` prepares Minecraft's world (and writes Killcraft's data pack) before it starts, `HeldItems.cs` puts ULTRAKILL's skulls in Minecraft's inventory, `SmileOs.cs` stands ULTRAKILL's shop on SMILEOS blocks, `Destruction.cs` and `MobHits.cs` take ULTRAKILL's weapons to Minecraft's blocks and mobs, and `mcmod/` is Killcraft's Minecraft mod (the potion, the SMILEOS block, the skulls, and Minecraft's side of all that).
 
 ## Credits
 
+- [alfr0762](https://github.com/alfr0762): the idea of SMILEOS terminals as Minecraft blocks.
 - [SkyCraft](https://github.com/chasmlol/SkyCraft) by chasmlol (MIT): the Minecraft mod, the link protocol and the idea. Killcraft is the ULTRAKILL side of it. The release zip includes SkyCraft's unmodified `SkyCraft-Minecraft.zip` with its license (`SkyCraft-LICENSE.txt`) and third-party notices (`SkyCraft-THIRD-PARTY-NOTICES.md`).
 - ULTRAKILL by Arsi "Hakita" Patala / New Blood Interactive. Minecraft by Mojang Studios. Killcraft isn't affiliated with either and contains none of their files.
 

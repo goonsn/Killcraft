@@ -1,0 +1,11 @@
+{
+  "type": "minecraft:block",
+  "pools": [
+    {
+      "condition": { "type": "minecraft:survives_explosion" },
+      "entries": [ { "type": "minecraft:item", "name": "killcraft:smileos_terminal" } ],
+      "rolls": 1
+    }
+  ],
+  "random_sequence": "killcraft:blocks/smileos_terminal"
+}

@@ -12,6 +12,10 @@ namespace Killcraft
     {
         // When the attack button was last pressed in the world (unscaled time; -1: never).
         public static float LastAttackPress = -1f;
+        // The right button held in the world: a raised shield, a drawn bow, eating.
+        public static bool UsingItem;
+        // A Potion of ULTRAKILL: the movement keys are ULTRAKILL's (walk, jump, dash, slide), not Minecraft's.
+        public static bool UltrakillMoves;
         private static bool routing;
         private static bool wasScreenOpen;
         private static Vector2 cursor;
@@ -24,6 +28,7 @@ namespace Killcraft
         public static void Frame(bool route, bool screenOpen, int width, int height)
         {
             screenOpenNow = screenOpen;
+            UsingItem = route && !screenOpen && Mouse.current != null && Mouse.current.rightButton.isPressed;
             if (!route)
             {
                 if (routing)
@@ -63,14 +68,14 @@ namespace Killcraft
                         continue;
                     }
                     Key key = k.keyCode;
-                    // Minecraft's third person (F5): ULTRAKILL's camera stays in V1's head and doesn't
-                    // draw Minecraft's player, so all that would change is the hand disappearing.
-                    if (key == Key.F5)
-                    {
-                        continue;
-                    }
+                    // (F5 too: Minecraft's third person, which Host follows with ULTRAKILL's camera.)
                     if (!screenOpen)
                     {
+                        if (UltrakillMoves && (key == Key.W || key == Key.A || key == Key.S || key == Key.D || key == Key.Space
+                            || key == Key.LeftShift || key == Key.LeftCtrl))
+                        {
+                            continue;
+                        }
                         if (key == Key.Escape)
                         {
                             continue;
@@ -104,7 +109,7 @@ namespace Killcraft
             {
                 // While the right button is held (a raised shield, a drawn bow, eating) a click doesn't
                 // attack, as in Minecraft: SkyCraft's own hitting of ULTRAKILL's enemies doesn't check.
-                bool usingItem = !screenOpen && mouse.rightButton.isPressed;
+                bool usingItem = UsingItem;
                 if (!screenOpen && !usingItem && mouse.leftButton.wasPressedThisFrame)
                 {
                     LastAttackPress = Time.unscaledTime;

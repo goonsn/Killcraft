@@ -14,8 +14,14 @@ namespace Killcraft
         private const float PickupRangeBlocks = 24f;
         private const int MaxLooseArrows = 48;
         public const float PickupPoke = 13.25f;
+        // When Killcraft's Minecraft mod last said the ULTRAKILL effect is on, or to stop it (Host).
+        public static float LastSignal = -100f, LastStop = -100f;
+        // Which world Minecraft's player is in, as Killcraft's mod says (and when it last said so).
+        public static bool DimensionNether;
+        public static float DimensionAt = -100f;
         private static readonly List<(uint Id, Vector3 Pos)> loose = new List<(uint, Vector3)>();
         private static readonly byte[] looseName = Encoding.UTF8.GetBytes(WorldRender.LooseArrowName);
+        private static readonly byte[] heldName = Encoding.UTF8.GetBytes(HeldItems.StateName);
         private static readonly Dictionary<EnemyIdentifier, uint> ids = new Dictionary<EnemyIdentifier, uint>();
         private static readonly Dictionary<uint, EnemyIdentifier> byId = new Dictionary<uint, EnemyIdentifier>();
         private static readonly Dictionary<uint, float> maxHealth = new Dictionary<uint, float>();
@@ -36,7 +42,12 @@ namespace Killcraft
             Link.WriteActors(records, 0);
         }
 
-        public static void Frame(bool active, NewMovement nm)
+        // active: enemies and loose arrows for Minecraft (Minecraft has V1). linked: what Killcraft's mod
+        // reads (V1's skulls, destruction), also while ULTRAKILL has V1; following: ULTRAKILL has V1 in
+        // the Nether and Minecraft's player only follows it.
+        private const int Reserved = 1 + 16;
+
+        public static void Frame(bool active, bool linked, bool following, NewMovement nm)
         {
             timer -= Time.unscaledDeltaTime;
             if (timer > 0f)
@@ -52,13 +63,31 @@ namespace Killcraft
             }
             int count = 0;
             var tracker = MonoSingleton.GetInstance(typeof(EnemyTracker)) as EnemyTracker;
-            if (active && nm != null && tracker != null)
+            // (The loose arrows also where ULTRAKILL tracks no enemies, as in the Sandbox.)
+            if (linked && nm != null)
+            {
+                // What V1 holds, for Killcraft's mod (HeldItems): dead, so SkyCraft makes no stand-in.
+                records[count++] = new ActorRecord
+                {
+                    FormId = HeldItems.StateId,
+                    Flags = Proto.ActorDead,
+                    Level = (ushort)HeldItems.HeldType,
+                    X = HeldItems.Carried(ItemType.SkullBlue),
+                    Y = HeldItems.Carried(ItemType.SkullRed),
+                    Z = HeldItems.Carried(ItemType.SkullGreen),
+                    Yaw = following ? 1f : 0f,
+                    Width = Host.FreezeWanted ? 1f : 0f,  // ULTRAKILL paused: Minecraft freezes too
+                    Name = heldName,
+                };
+                count = Destruction.Publish(records, count);
+            }
+            if (active && nm != null)
             {
                 Vector3 p = nm.transform.position;
                 float range = RangeBlocks * Coords.U;
-                foreach (EnemyIdentifier eid in tracker.GetCurrentEnemies())
+                foreach (EnemyIdentifier eid in tracker != null ? tracker.GetCurrentEnemies() : (IEnumerable<EnemyIdentifier>)Array.Empty<EnemyIdentifier>())
                 {
-                    if (eid == null || count >= Proto.MaxActors || !TryBounds(eid, out Bounds b) || (b.center - p).sqrMagnitude > range * range)
+                    if (eid == null || count >= Proto.MaxActors - Reserved || !TryBounds(eid, out Bounds b) || (b.center - p).sqrMagnitude > range * range)
                     {
                         continue;
                     }
@@ -89,7 +118,7 @@ namespace Killcraft
                     };
                 }
                 // Arrows on corpses and the floor, to be picked up (see WorldRender.LooseArrows).
-                WorldRender.LooseArrows(loose, p, PickupRangeBlocks * Coords.U, Math.Min(MaxLooseArrows, Proto.MaxActors - count));
+                WorldRender.LooseArrows(loose, p, PickupRangeBlocks * Coords.U, Math.Max(0, Math.Min(MaxLooseArrows, Proto.MaxActors - count)));
                 foreach (var (id, at) in loose)
                 {
                     Coords.ToMc(at - Vector3.up * (0.125f * Coords.U), out double x, out double y, out double z);
@@ -158,6 +187,9 @@ namespace Killcraft
             // nearest enemy, so the hit still counts as theirs and a shield can block it.
             return best != 0 ? best : nearest;
         }
+
+        public static bool IsBoss(uint id) =>
+            byId.TryGetValue(id, out EnemyIdentifier eid) && eid != null && (eid.isBoss || eid.GetComponent<BossHealthBar>() != null);
 
         private static string SafeName(EnemyIdentifier eid)
         {
@@ -249,6 +281,29 @@ namespace Killcraft
                         Hit(eid, e);
                     }
                     break;
+                case Proto.EvKcUltrakillMoves:
+                    LastSignal = Time.unscaledTime;
+                    break;
+                case Proto.EvKcUltrakillStop:
+                    LastStop = Time.unscaledTime;
+                    break;
+                case Proto.EvKcDimension:
+                    DimensionNether = e.A > 0.5f;
+                    DimensionAt = Time.unscaledTime;
+                    break;
+                case Proto.EvKcFollowerHurt:
+                    // (Minecraft's damage is ULTRAKILL's / 5; ULTRAKILL's own hurt cooldown paces lava.)
+                    if (nm != null && !nm.dead && !Patches.OwnsPlayer && e.A > 0f)
+                    {
+                        nm.GetHurt(Mathf.Max(1, Mathf.RoundToInt(e.A * 5f)), true);
+                    }
+                    break;
+                case Proto.EvKcHeldSelected:
+                    HeldItems.Selected((int)e.A);
+                    break;
+                case Proto.EvKcTerminal:
+                    SmileOs.Seen((int)e.A, (int)e.B, (int)e.C, (int)e.D);
+                    break;
                 case Proto.EvArrowStuck:
                     if (byId.TryGetValue(e.FormId, out EnemyIdentifier stuckIn) && stuckIn != null)
                     {
@@ -299,6 +354,7 @@ namespace Killcraft
                 x.maxSize *= k;
                 x.speed = (x.speed == 0f ? 1f : x.speed) * k;
                 x.canHit = AffectedSubjects.EnemiesOnly;
+                Destruction.FromMinecraft(x);  // (Minecraft's explosion already broke its blocks)
             }
             if (Plugin.Diagnostics.Value)
             {

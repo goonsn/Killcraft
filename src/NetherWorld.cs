@@ -55,11 +55,15 @@ namespace Killcraft
             {
                 sections[key] = s = new SectionSolids { Bits = new ulong[64] };
             }
+            // (Minecraft sends a section again whenever anything in it changes, fire and lava too: only
+            // a change of its solid blocks needs new colliders and a new navmesh.)
+            bool changed = s.Colliders == null;
             for (int i = 0; i < 64; i++)
             {
+                changed |= s.Bits[i] != bits[i];
                 s.Bits[i] = bits[i];
             }
-            s.Dirty = true;
+            s.Dirty |= changed;
         }
 
         // Minecraft changed dimension (or reconnected): everything goes.
@@ -217,6 +221,8 @@ namespace Killcraft
         private static int buildIndex;
         private static Vector3 builtAround;
         private static bool haveBuilt;
+        private static float lastBuildAt = -100f;
+        private const float RebuildEvery = 4f;  // seconds
 
         private static void UpdateNavmesh(Vector3 v1)
         {
@@ -227,9 +233,16 @@ namespace Killcraft
             building = null;
             float u = Coords.U;
             bool moved = !haveBuilt || (v1 - builtAround).sqrMagnitude > 12f * u * 12f * u;
-            if (buildIndex == 0 && !moved && !collidersChanged)
+            // (Blocks broken or placed: not more often than every few seconds. Gathering the colliders
+            // for a build is the costly part, on the main thread.)
+            bool changedNow = collidersChanged && Time.time - lastBuildAt > RebuildEvery;
+            if (buildIndex == 0 && !moved && !changedNow)
             {
                 return;
+            }
+            if (buildIndex == 0)
+            {
+                lastBuildAt = Time.time;
             }
             if (meshes.Count == 0)
             {
@@ -255,6 +268,8 @@ namespace Killcraft
             settings.voxelSize = Mathf.Max(0.2f, settings.agentRadius / 2f);
             settings.overrideTileSize = true;
             settings.tileSize = 64;
+            // Up one block (Minecraft's own step): the Nether is all one-block steps.
+            settings.agentClimb = Mathf.Max(settings.agentClimb, 1.05f * u);
             if (m.Data == null)
             {
                 m.Data = new NavMeshData(m.AgentType);
@@ -289,20 +304,34 @@ namespace Killcraft
 
         // ---- enemies --------------------------------------------------------------------------------
 
-        // What turns up, and how often (no bosses).
+        // What turns up, and how often: the common husks and machines (no bosses, nor the strong or
+        // heavy ones: Virtues, Mindflayers, Cerberi, Swordsmachines, Malicious Faces).
         private static readonly (EnemyType Type, int Weight)[] Kinds =
         {
-            (EnemyType.Filth, 30), (EnemyType.Stray, 25), (EnemyType.Drone, 16), (EnemyType.Schism, 12),
-            (EnemyType.Soldier, 12), (EnemyType.Streetcleaner, 5), (EnemyType.MaliciousFace, 4), (EnemyType.Cerberus, 4),
-            (EnemyType.Swordsmachine, 3), (EnemyType.Virtue, 3), (EnemyType.Mindflayer, 2),
+            (EnemyType.Filth, 35), (EnemyType.Stray, 28), (EnemyType.Schism, 14), (EnemyType.Soldier, 12),
+            (EnemyType.Drone, 8), (EnemyType.Streetcleaner, 3),
         };
+
+        // And now and then a mini-boss, one at a time (Plugin.NetherMiniBosses), with a boss bar.
+        private static readonly (EnemyType Type, int Weight)[] MiniBosses =
+        {
+            (EnemyType.Swordsmachine, 5), (EnemyType.Cerberus, 4), (EnemyType.Guttertank, 3), (EnemyType.Gutterman, 3),
+            (EnemyType.Mindflayer, 2), (EnemyType.HideousMass, 2), (EnemyType.Ferryman, 2),
+        };
+        private const float MiniBossEvery = 50f;      // seconds between tries
+        private const double MiniBossChance = 0.5;
+        private static EnemyIdentifier miniBoss;
+        private static float miniBossTimer = MiniBossEvery;
+
+        // One of the Nether's own enemies (Nether leaves those after V1).
+        public static bool IsOurs(EnemyIdentifier eid) => spawned.Contains(eid);
 
         private static SpawnableObjectsDatabase database;
         private static bool databaseMissing, announced;
         private static readonly List<EnemyIdentifier> spawned = new List<EnemyIdentifier>();
         private static readonly System.Random random = new System.Random();
 
-        private static SpawnableObject Pick()
+        private static SpawnableObject Pick(EnemyType? only = null)
         {
             if (database == null && !databaseMissing)
             {
@@ -342,21 +371,7 @@ namespace Killcraft
                 announced = true;
                 Plugin.Log.LogInfo($"Nether: ULTRAKILL enemies turn up there ({database.enemies.Length} kinds in ULTRAKILL's list, {NavMesh.GetSettingsCount()} navmesh agent types)");
             }
-            int total = 0;
-            foreach (var k in Kinds)
-            {
-                total += k.Weight;
-            }
-            int roll = random.Next(total);
-            EnemyType type = Kinds[0].Type;
-            foreach (var k in Kinds)
-            {
-                if ((roll -= k.Weight) < 0)
-                {
-                    type = k.Type;
-                    break;
-                }
-            }
+            EnemyType type = only ?? Roll(Kinds);
             foreach (SpawnableObject o in database.enemies)
             {
                 if (o != null && o.gameObject != null && o.enemyType == type)
@@ -367,12 +382,34 @@ namespace Killcraft
             return null;
         }
 
-        private static void Spawn(Vector3 v1)
+        private static EnemyType Roll((EnemyType Type, int Weight)[] kinds)
         {
-            SpawnableObject what = Pick();
+            int total = 0;
+            foreach (var k in kinds)
+            {
+                total += k.Weight;
+            }
+            int roll = random.Next(total);
+            foreach (var k in kinds)
+            {
+                if ((roll -= k.Weight) < 0)
+                {
+                    return k.Type;
+                }
+            }
+            return kinds[0].Type;
+        }
+
+        private static EnemyIdentifier Spawn(Vector3 v1, EnemyType? only = null)
+        {
+            SpawnableObject what = Pick(only);
             if (what == null)
             {
-                return;
+                if (only != null)
+                {
+                    Plugin.Log.LogInfo($"Nether: no {only} in ULTRAKILL's list of enemies");
+                }
+                return null;
             }
             float u = Coords.U;
             NavMeshAgent agent = what.gameObject.GetComponentInChildren<NavMeshAgent>(true);
@@ -406,10 +443,44 @@ namespace Killcraft
                 EnemyIdentifier eid = go.GetComponentInChildren<EnemyIdentifier>(true);
                 if (eid != null)
                 {
+                    eid.ignorePlayer = false;
                     spawned.Add(eid);
                 }
                 Plugin.Log.LogInfo($"Nether: a {what.objectName} turns up ({(agent != null ? "walking" : "flying")})");
+                return eid;
+            }
+            return null;
+        }
+
+        // A mini-boss now and then, while none is about.
+        private static void MiniBoss(Vector3 v1, float dt)
+        {
+            if (miniBoss != null && !miniBoss.dead)
+            {
                 return;
+            }
+            miniBoss = null;
+            if (!Plugin.NetherMiniBosses.Value || (miniBossTimer -= dt) > 0f)
+            {
+                return;
+            }
+            miniBossTimer = MiniBossEvery;
+            if (random.NextDouble() >= MiniBossChance)
+            {
+                return;
+            }
+            EnemyIdentifier eid = Spawn(v1, Roll(MiniBosses));
+            if (eid != null)
+            {
+                miniBoss = eid;
+                try
+                {
+                    eid.BossBar(true);
+                }
+                catch (Exception e)
+                {
+                    Plugin.Log.LogWarning($"Nether: no boss bar for the {eid.enemyType}: {e.Message}");
+                }
             }
         }
 
@@ -482,6 +553,10 @@ namespace Killcraft
                     Spawn(v1);
                 }
             }
+            if (max > 0)
+            {
+                MiniBoss(v1, dt);
+            }
         }
 
         // V1 left the Nether: its enemies, navmesh and colliders go.
@@ -506,6 +581,8 @@ namespace Killcraft
                 s.Dirty = true;
             }
             spawnTimer = SpawnEvery;
+            miniBoss = null;
+            miniBossTimer = MiniBossEvery;
             wasActive = false;
         }
     }

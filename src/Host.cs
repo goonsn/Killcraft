@@ -59,8 +59,11 @@ namespace Killcraft
             return h == 0 ? 1 : h;
         }
 
+        internal static Host Current;
+
         private void Update()
         {
+            Current = this;
             if (!Link.Ready)
             {
                 return;
@@ -104,6 +107,7 @@ namespace Killcraft
                 if (newProcess)
                 {
                     mcFrozen = false;
+                    mcMuted = false;
                     McCommand.Clear();
                 }
             }
@@ -125,6 +129,7 @@ namespace Killcraft
             bool loading = SceneHelper.PendingScene != null;
             inGame = nm != null && cc != null && !mainMenu && nm.gameObject.activeInHierarchy;
             bool paused = options != null && options.paused;
+            pausedNow = paused;
 
             // The toggle key: Minecraft off (plain ULTRAKILL, Minecraft's player waits where it is) or
             // back on (Minecraft's player comes to V1 and takes over again).
@@ -132,8 +137,10 @@ namespace Killcraft
             if (keyboard != null && inGame && !paused && !(Patches.OwnsPlayer && Patches.McScreenOpen) && ToggleKey(keyboard))
             {
                 toggleNotice = 3f;
-                // (Not in the Nether: it's only Minecraft's blocks, nothing ULTRAKILL's V1 could stand on.)
-                toggleRefused = Coords.InNether && !mcDisabled;
+                // (In the Nether only over ground: there it's Killcraft's colliders from Minecraft's blocks
+                // around V1, kept loaded by Minecraft's player following V1 about.)
+                toggleRefused = Coords.InNether && !mcDisabled
+                    && !Physics.Raycast(nm.transform.position, Vector3.down, 24f * Coords.U, 1 << 8, QueryTriggerInteraction.Ignore);
                 if (!toggleRefused)
                 {
                     mcDisabled = !mcDisabled;
@@ -161,7 +168,16 @@ namespace Killcraft
                 WorldRender.Reposition();
                 WorldRender.LevelLoaded();
                 Nether.LevelChanged();
+                SmileOs.LevelChanged();
+                HeldItems.LevelChanged();
                 Plugin.Log.LogInfo($"level {scene} (world {worldId:X8}, Minecraft area offset {Coords.OffsetX}, {Coords.OffsetZ})");
+                // A new level with Minecraft's player still in the Nether: it comes out (and then to V1).
+                if (haveMc && mcInWorld && (Coords.InNether || (Time.unscaledTime - Combat.DimensionAt < 2f && Combat.DimensionNether)))
+                {
+                    Plugin.Log.LogInfo("a new level with Minecraft's player in the Nether: sending it back");
+                    Destruction.LeaveNether();
+                    leaveNetherTimer = 5f;
+                }
                 epoch++;
                 Collision.ForgetMeshes();
                 Collision.Reset(epoch);
@@ -197,7 +213,11 @@ namespace Killcraft
                     diedInNether = false;
                 }
             }
-            if (haveMc && mcInWorld && !diedInNether && Coords.IsNetherX(mc.X) != Coords.InNether)
+            // (Only when Minecraft's player really is in that world, Killcraft's mod says: put in the
+            // Nether at the level's coordinates, it's sent back to its landing, not a trip.)
+            bool dimensionKnown = Time.unscaledTime - Combat.DimensionAt < 2f;
+            bool atNetherX = haveMc && Coords.IsNetherX(mc.X);
+            if (haveMc && mcInWorld && !diedInNether && atNetherX != Coords.InNether && (!dimensionKnown || Combat.DimensionNether == atNetherX))
             {
                 Coords.SetNether(!Coords.InNether);
                 WorldRender.Reposition();
@@ -208,9 +228,21 @@ namespace Killcraft
                 }
                 Plugin.Log.LogInfo(Coords.InNether ? $"Minecraft's player went to the Nether ({mc.X:0}, {mc.Y:0}, {mc.Z:0})"
                     : $"Minecraft's player is back from the Nether ({mc.X:0}, {mc.Y:0}, {mc.Z:0})");
+                // ULTRAKILL has V1 (F9): it goes where Minecraft's player came out. (Only if V1 was in the
+                // world Minecraft's player left: sent out of the Nether for a new level, it's V1 that
+                // Minecraft's player comes to, not the other way round.)
+                if (mcDisabled && inGame && !nm.dead && Coords.IsNetherUnity(nm.transform.position) != Coords.InNether)
+                {
+                    Vector3 root = Coords.ToUnity(mc.X, mc.Y, mc.Z) + Vector3.up * Coords.FeetBelowRoot;
+                    nm.transform.position = root;
+                    nm.rb.position = root;
+                    nm.rb.velocity = Vector3.zero;
+                    lastSetRoot = root;
+                }
             }
             // Where Minecraft's player last was in the level (alive): where it comes back to.
-            if (haveMc && mcInWorld && !mcDead && !Coords.InNether && !diedInNether && !Coords.IsNetherX(mc.X))
+            if (haveMc && mcInWorld && !mcDead && !Coords.InNether && !diedInNether && !Coords.IsNetherX(mc.X)
+                && !(dimensionKnown && Combat.DimensionNether))
             {
                 levelX = mc.X;
                 levelY = mc.Y;
@@ -238,7 +270,7 @@ namespace Killcraft
             {
                 leaveNetherTimer = 5f;
                 Plugin.Log.LogInfo("V1 is in the level but Minecraft's player is in the Nether: sending it back through its portal");
-                McCommand.Run("function killcraft:leave_nether");
+                Destruction.LeaveNether();
             }
 
             // ULTRAKILL moved V1 itself (checkpoint, respawn, level script): Minecraft follows. Those
@@ -297,15 +329,97 @@ namespace Killcraft
             bool follow = Coords.InNether
                 ? !mcLeftInNether && !ultrakillTakes
                 : (puppet || (crossed && !ultrakillTakes)) && !teleportPending && mc.TeleportAck == teleportSeq;
-            if (away && follow && !nm.dead && !mcDead)
+            if (away && follow && !nm.dead && !mcDead && !ultrakillDrives)
             {
                 Plugin.Log.LogInfo($"Minecraft's player moved itself to ({mc.X:0.0}, {mc.Y:0.0}, {mc.Z:0.0}): V1 follows");
                 away = false;
             }
+            // A Potion of ULTRAKILL: ULTRAKILL's movement moves V1, and Minecraft's player (still the
+            // one with the items, health and attacks) is put where V1 is, 20 times a second.
+            // (Not from the moment Minecraft's player steps into a Nether portal: Killcraft's mod says so.)
+            // In the Nether V1 only has ground where Killcraft has built it from Minecraft's blocks
+            // (NetherWorld): not just after arriving, nor over nothing (V1 would fall out of the Nether).
+            if (crossed)
+            {
+                crossedAt = Time.unscaledTime;
+            }
+            bool netherGround = !Coords.InNether || (Time.unscaledTime - crossedAt > 2f
+                && Physics.Raycast(nm.transform.position, Vector3.down, 24f * Coords.U, 1 << 8, QueryTriggerInteraction.Ignore));
+            bool ukWanted = inGame && !loading && !crossed && !mcDisabled && !nm.dead && !mcDead && netherGround
+                && Time.unscaledTime - Combat.LastSignal < 2f && Time.unscaledTime - Combat.LastStop > 3f;
+            // Minecraft off (F9): ULTRAKILL has V1, and Minecraft's player follows it the same way (what
+            // would hurt it hurts V1: Killcraft's mod), so it keeps the world (the Nether) loaded around
+            // V1 and goes through the Nether portals V1 walks into. (Not while it's in one, nor just
+            // after a trip.) In a portal it waits there for Minecraft's portal to take it, while V1 stays
+            // in it too: V1 walking out (as off the portal it came out of) takes it along again.
+            bool inPortal = Time.unscaledTime - Combat.LastStop < 0.5f;
+            bool v1AtMc = haveMc && Math.Abs(mc.X - tx) < 1.5 && Math.Abs(mc.Y - ty) < 2.5 && Math.Abs(mc.Z - tz) < 1.5;
+            netherFree = mcDisabled && Coords.InNether == v1InNether && inGame && !loading && haveMc && mcInWorld && !nm.dead && !mcDead
+                && !(inPortal && v1AtMc) && Time.unscaledTime - crossedAt > 2f;
+            if (netherFree)
+            {
+                teleportPending = false;  // (its own moves are this)
+            }
+            if (ultrakillDrives || netherFree)
+            {
+                // V1's real feet (its collider shrinks while sliding, so not a fixed offset): Minecraft's
+                // player put even a little into the floor crawls, its eye at the ground.
+                if (nm.playerCollider != null && nm.playerCollider.enabled)
+                {
+                    Vector3 pos = nm.transform.position;
+                    Coords.ToMc(new Vector3(pos.x, nm.playerCollider.bounds.min.y + 0.02f * Coords.U, pos.z), out tx, out ty, out tz);
+                }
+                // Somewhere else than it was put (an ender pearl, a portal, respawning): V1 goes there.
+                bool jumped = ultrakillDrives && ukTargetSet && teleportSeq == ukSeq && mc.TeleportAck == teleportSeq
+                    && (Math.Abs(mc.X - ukX) > 4 || Math.Abs(mc.Y - ukY) > 4 || Math.Abs(mc.Z - ukZ) > 4);
+                if (jumped)
+                {
+                    Plugin.Log.LogInfo($"Minecraft's player moved itself to ({mc.X:0.0}, {mc.Y:0.0}, {mc.Z:0.0}): V1 follows");
+                    Vector3 root = Coords.ToUnity(mc.X, mc.Y, mc.Z) + Vector3.up * Coords.FeetBelowRoot;
+                    nm.transform.position = root;
+                    nm.rb.position = root;
+                    nm.rb.velocity = Vector3.zero;
+                    lastSetRoot = root;
+                    tx = mc.X;
+                    ty = mc.Y;
+                    tz = mc.Z;
+                    ukTargetSet = false;
+                }
+                // (Never to the other world's coordinates, nor in the Nether a sudden jump far away: V1
+                // flung or moved by ULTRAKILL. Minecraft's player waits; V1 out of the Nether brings it back.)
+                else if (Coords.IsNetherX(tx) != Coords.InNether
+                    || (Coords.InNether && (Math.Abs(tx - mc.X) > 200 || Math.Abs(ty - mc.Y) > 200 || Math.Abs(tz - mc.Z) > 200)))
+                {
+                    if (Time.unscaledTime - farLogAt > 5f)
+                    {
+                        farLogAt = Time.unscaledTime;
+                        Plugin.Log.LogInfo($"V1 is far from Minecraft's player ({tx:0}, {ty:0}, {tz:0}): it isn't moved there");
+                    }
+                }
+                else if (!teleportPending && mc.TeleportAck == teleportSeq && Time.unscaledTime - ukSentAt >= 0.05f
+                    && (!ukTargetSet || Math.Abs(tx - ukX) > 0.01 || Math.Abs(ty - ukY) > 0.01 || Math.Abs(tz - ukZ) > 0.01))
+                {
+                    teleportSeq++;
+                    ukX = tx;
+                    ukY = ty;
+                    ukZ = tz;
+                    ukTargetSet = true;
+                    ukSeq = teleportSeq;
+                    ukSentAt = Time.unscaledTime;
+                }
+                away = false;
+            }
+            else if (puppet && !away && !teleportPending && mc.TeleportAck == teleportSeq && !mcDead && !Coords.InNether
+                && RisingFloor(Coords.ToUnity(mc.X, mc.Y, mc.Z), out Vector3 top))
+            {
+                Coords.ToMc(top, out tx, out ty, out tz);
+                teleportSeq++;
+            }
             StepTowards(away, inGame && !loading && !ultrakillTakes && !nm.dead && !Coords.InNether, tx, ty, tz);
 
             arriving = haveMc && mcInWorld && inGame && !loading && (mc.TeleportAck != teleportSeq || away) && !ultrakillTakes;
-            puppet = haveMc && mcInWorld && inGame && !loading && mc.TeleportAck == teleportSeq && !away && !nm.dead && !ultrakillTakes;
+            // (While ULTRAKILL moves V1 its teleports are only just sent: Minecraft still has the player.)
+            puppet = haveMc && mcInWorld && inGame && !loading && (mc.TeleportAck == teleportSeq || (ultrakillDrives && ukTargetSet)) && !away && !nm.dead && !ultrakillTakes;
             bool owns = (puppet || arriving) && inGame && !nm.dead;
             if (owns != (controlled != null) || (owns && controlled != nm))
             {
@@ -317,6 +431,13 @@ namespace Killcraft
                 SetControl(owns ? nm : null);
             }
             everPuppet |= puppet;
+            // A jump pad's launch lasts until V1 is down again.
+            if (launching && (nm.dead || !inGame || loading || !netherGround || Time.unscaledTime - launchSince > 10f
+                || (Time.unscaledTime - launchSince > 0.3f && nm.gc != null && nm.gc.onGround)))
+            {
+                launching = false;
+            }
+            SetUltrakillDrives(controlled != null && puppet && (ukWanted || launching));
             // Restarting from a checkpoint in the first moments of dying can leave ULTRAKILL's death
             // sequence (red screen, slowed sound) running on a living V1: end it the way a respawn does.
             if (puppet && !nm.dead && nm.deathSequence != null && nm.deathSequence.gameObject.activeSelf)
@@ -325,7 +446,8 @@ namespace Killcraft
                 nm.deathSequence.gameObject.SetActive(false);
             }
             Patches.OwnsPlayer = controlled != null;
-            Lockout.Frame(controlled != null);
+            Lockout.Frame(controlled != null, ultrakillDrives);
+            HeldItems.Frame(controlled != null, nm != null ? nm.cc : null);
             // (Also when ULTRAKILL has V1 — toggled off, dead: Minecraft's mobs and TNT carry on otherwise.)
             FreezeMinecraft(paused && inGame);
             // The chat McCommand opens isn't a Minecraft screen the player has open: Esc still belongs to
@@ -334,10 +456,13 @@ namespace Killcraft
 
             // (Respawning puts Minecraft's player at its spawn point: Killcraft's data pack keeps that
             // where the player last stood, so a death is a short move. See McSave.)
+            InputForward.UltrakillMoves = ultrakillDrives;
             InputForward.Frame(controlled != null && puppet && !paused && !McCommand.Busy, screenOpen, Screen.width, Screen.height);
             // (Also while Minecraft is on its way to V1, as through a Nether portal: no flash of ULTRAKILL's HUD.)
             HudHider.Frame(controlled != null, nm);
-            Combat.Frame(alive && inGame && mcInWorld && !mcDisabled, nm);
+            // (Before Combat publishes the damage requests MobHits makes.)
+            MobHits.Frame(mcDisabled && inGame && !loading && haveMc && mcInWorld && !nm.dead, haveMc ? Coords.ToUnity(mc.X, mc.Y, mc.Z) : Vector3.zero);
+            Combat.Frame(alive && inGame && mcInWorld && !mcDisabled, inGame && haveMc && mcInWorld, netherFree, nm);
             while (Link.PopEvent(out McEvent e))
             {
                 Combat.Handle(e, nm);
@@ -352,7 +477,10 @@ namespace Killcraft
                 // Also until Minecraft's player is in its world and we know where: it waits where it
                 // is (a saved spot, the spawn after dying), and only then is walked here (StepTowards).
                 Flags = (inGame ? Proto.SkyInGame : 0) | (paused ? Proto.SkyMenuOpen : 0)
-                    | (loading || (!diedInNether && (ultrakillTakes || (nm != null && nm.dead) || (inGame && !(haveMc && mcInWorld)))) ? Proto.SkyLoading : 0),
+                    // (Not with Minecraft off (F9): its player follows V1, and in between, as in a Nether
+                    // portal, just stands. Held, SkyCraft would keep holding it at that spot after the
+                    // portal took it, the level's coordinates in the Nether.)
+                    | (loading || (!diedInNether && ((ultrakillTakes && !mcDisabled) || (nm != null && nm.dead) || (inGame && !(haveMc && mcInWorld)))) ? Proto.SkyLoading : 0),
                 WorldId = worldId,
                 Epoch = (uint)epoch,
                 TeleportSeq = teleportSeq,
@@ -382,13 +510,16 @@ namespace Killcraft
                 //    the portal it came through (or near its spawn point);
                 //  - V1 still in the Nether (dead, Minecraft's player respawned): the same.
                 bool ownTeleport = teleportPending || haveWaypoint || mc.TeleportAck != teleportSeq || away;
-                if ((Coords.InNether || diedInNether || v1InNether) && haveLevelPos)
+                // (Except a Potion of ULTRAKILL's own move, in the Nether too.)
+                bool ukMove = (ultrakillDrives || netherFree) && mc.TeleportAck != teleportSeq;
+                if ((Coords.InNether || diedInNether || v1InNether) && haveLevelPos && !ukMove)
                 {
                     sky.X = levelX;
                     sky.Y = levelY;
                     sky.Z = levelZ;
                 }
-                else if (haveMc && mcInWorld && !mcDead && puppet && !ownTeleport)
+                // (Following V1 with Minecraft off, too: waiting in a portal, it's about to go through.)
+                else if (haveMc && mcInWorld && !mcDead && (puppet || (mcDisabled && inPortal)) && !ownTeleport && !ukMove)
                 {
                     sky.X = Coords.NetherX + Math.Floor(mc.X / 8) + 0.5;
                     sky.Y = Coords.NetherLandingY;
@@ -460,32 +591,32 @@ namespace Killcraft
         private double levelX, levelY, levelZ;
         private bool haveWaypoint, everPuppet;
         private const float TeleportUnits = 8f;
-        // ULTRAKILL's pause freezes Minecraft's world too (its mobs, TNT, ...). SkyCraft makes no
-        // Minecraft screen pause the game while it's linked, so it's Minecraft's /tick freeze, typed
-        // in (McCommand) while Minecraft's HUD is hidden behind ULTRAKILL's pause menu. Around it the
-        // data pack turns command messages off and back on (killcraft:mute/unmute, see McSave), so
-        // pausing doesn't leave "game frozen / running normally" in the chat.
+        // ULTRAKILL's pause freezes Minecraft's world too (its mobs, TNT, ...): Killcraft's mod freezes
+        // its ticking while Killcraft says so (Combat publishes it; nothing published, as on ULTRAKILL's
+        // main menu, is never frozen). (It used to be /tick freeze typed into Minecraft's chat, which a
+        // trip out of the Nether at the same moment could swallow, leaving Minecraft frozen.)
         private bool mcFrozen;
+        internal static bool FreezeWanted;
 
         private void FreezeMinecraft(bool freeze)
         {
             if (freeze != mcFrozen && haveMc && mcInWorld)
             {
                 mcFrozen = freeze;
-                McAudio.SetMuted(Link.McPid(), freeze);
-                if (freeze)
-                {
-                    McCommand.Run("function killcraft:mute");
-                    McCommand.Run("tick freeze");
-                }
-                else
-                {
-                    McCommand.Run("tick unfreeze");
-                    McCommand.Run("function killcraft:unmute");
-                }
+                Plugin.Log.LogInfo(freeze ? "Minecraft frozen (paused)" : "Minecraft running again");
+            }
+            FreezeWanted = mcFrozen;
+            // Its sound is off while paused, and while ULTRAKILL has V1 (F9): then Minecraft's player
+            // only follows V1 about, and its steps, swings and burning would be noise.
+            bool mute = mcFrozen || (mcDisabled && inGame);
+            if (mute != mcMuted && haveMc)
+            {
+                mcMuted = mute;
+                McAudio.SetMuted(Link.McPid(), mute);
             }
             McCommand.Frame(haveMc && mcInWorld, screenOpen);
         }
+        private bool mcMuted;
         private double wpX, wpY, wpZ, wpFromX, wpFromY, wpFromZ;
 
         private void StepTowards(bool away, bool canStep, double tx, double ty, double tz)
@@ -540,8 +671,144 @@ namespace Killcraft
             }
         }
 
+        // Minecraft's third person (F5): ULTRAKILL's camera goes where Minecraft's is, behind the player
+        // (or in front, looking back), pulled in where ULTRAKILL's level is in the way. Minecraft draws
+        // its own player then, and that comes with its scene (WorldRender). Also run after ULTRAKILL's
+        // camera has placed itself (Patches), so this always has the last word.
+        private Vector3 lastEye, lastFeet;
+        private bool thirdPerson, pausedNow;
+        private const int CameraBlockers = (1 << 6) | (1 << 7) | (1 << 8) | (1 << 24) | (1 << 26);
+
+        internal void ThirdPerson()
+        {
+            CameraController cc = controlled != null ? controlled.cc : null;
+            bool on = cc != null && haveMc && mcInWorld && inGame && !pausedNow && mc.CameraMode != 0;
+            Vector3 feet = controlled != null ? (puppet && !ultrakillDrives ? lastFeet : controlled.transform.position - Vector3.up * Coords.FeetBelowRoot) : Vector3.zero;
+            WorldRender.PlaceAvatar(on, feet);
+            if (!on)
+            {
+                if (thirdPerson && cc != null)
+                {
+                    cc.transform.localPosition = cc.defaultPos;
+                }
+                thirdPerson = false;
+                return;
+            }
+            thirdPerson = true;
+            Vector3 eye = puppet && !ultrakillDrives ? lastEye : cc.transform.parent.localToWorldMatrix.MultiplyPoint3x4(cc.defaultPos);
+            float dist = (mc.CameraDistance > 0.1f ? mc.CameraDistance : 4f) * Coords.U;
+            // Where V1 looks, from ULTRAKILL's look angles: not the camera's own facing, which this
+            // turns round for the front view (and this runs twice a frame).
+            Quaternion look = cc.transform.parent.rotation * Quaternion.AngleAxis(-cc.rotationX, Vector3.right);
+            Vector3 forward = look * Vector3.forward;
+            Vector3 dir = mc.CameraMode == 2 ? forward : -forward;
+            if (Physics.SphereCast(eye, 0.2f * Coords.U, dir, out RaycastHit hit, dist, CameraBlockers, QueryTriggerInteraction.Ignore))
+            {
+                dist = Mathf.Max(0f, hit.distance - 0.05f * Coords.U);
+            }
+            cc.transform.position = eye + dir * dist;
+            cc.transform.rotation = mc.CameraMode == 2 ? Quaternion.LookRotation(-forward, look * Vector3.up) : look;
+        }
+
+        // Floors that rise (the Cybergrind's pillars between waves, lifts) come up through Minecraft's
+        // player before Minecraft has their new collision, and Minecraft never pushes a player out of
+        // a shape: it falls through. When the surface under its feet is rising and already above them,
+        // the player is put back on top.
+        private Collider floorCollider;
+        private float floorTop, floorLift;
+
+        private bool RisingFloor(Vector3 feet, out Vector3 top)
+        {
+            top = feet;
+            float u = Coords.U;
+            Collider below = null;
+            RaycastHit hit = default;
+            float nearest = float.MaxValue;
+            foreach (RaycastHit h in Physics.RaycastAll(feet + Vector3.up * (1.6f * u), Vector3.down, 1.65f * u, CameraBlockers, QueryTriggerInteraction.Ignore))
+            {
+                if (h.distance < nearest && !WorldRender.IsOurs(h.collider))
+                {
+                    nearest = h.distance;
+                    below = h.collider;
+                    hit = h;
+                }
+            }
+            if (below == null)
+            {
+                floorCollider = null;
+                return false;
+            }
+            float colliderTop = below.bounds.max.y;
+            bool rising = below == floorCollider && colliderTop > floorTop + 0.001f;
+            floorCollider = below;
+            floorTop = colliderTop;
+            floorLift -= Time.unscaledDeltaTime;
+            if (!rising || hit.point.y < feet.y + 0.03f * u || floorLift > 0f)
+            {
+                return false;
+            }
+            floorLift = 0.1f;
+            top = new Vector3(feet.x, hit.point.y + 0.01f * u, feet.z);
+            return true;
+        }
+
+        // ULTRAKILL's jump pads and launchers set V1's velocity, which a puppet (kinematic) V1 doesn't
+        // have: for the flight ULTRAKILL's physics move V1 (as for a Potion of ULTRAKILL), and
+        // Minecraft takes over again when it lands. Called just before the launch (Patches).
+        private bool launching;
+        private float launchSince, crossedAt = -100f;
+
+        internal void StartLaunch()
+        {
+            if (controlled == null || !puppet)
+            {
+                return;
+            }
+            launching = true;
+            launchSince = Time.unscaledTime;
+            if (!ultrakillDrives)
+            {
+                Plugin.Log.LogInfo("launched: ULTRAKILL's physics move V1 until it lands");
+                SetUltrakillDrives(true);
+            }
+        }
+
+        // A Potion of ULTRAKILL working (see Update): V1 is ULTRAKILL's physics again, not Minecraft's
+        // puppet.
+        private bool ultrakillDrives, ukTargetSet, netherFree;
+        private float farLogAt = -100f;
+        private double ukX, ukY, ukZ;
+        private float ukSentAt;
+        private uint ukSeq;
+
+        private void SetUltrakillDrives(bool on)
+        {
+            if (on == ultrakillDrives)
+            {
+                return;
+            }
+            ultrakillDrives = on;
+            ukTargetSet = false;
+            Patches.UltrakillMoves = on;
+            // Minecraft's movement keys held now would stay held.
+            Link.PushInput(Proto.InReleaseAll);
+            if (controlled != null && controlled.rb != null)
+            {
+                controlled.rb.velocity = Vector3.zero;
+                controlled.rb.isKinematic = !on;
+                controlled.rb.interpolation = on ? savedInterpolation : RigidbodyInterpolation.None;
+            }
+            Plugin.Log.LogInfo(on ? "ULTRAKILL's movement moves V1 (Potion of ULTRAKILL or a launch)" : "Minecraft moves V1 again");
+        }
+
         private void SetControl(NewMovement nm)
         {
+            if (ultrakillDrives)
+            {
+                ultrakillDrives = false;
+                ukTargetSet = false;
+                Patches.UltrakillMoves = false;
+            }
             var guns = Find<GunControl>();
             var fists = Find<FistControl>();
             if (controlled != null)
@@ -602,7 +869,10 @@ namespace Killcraft
             NewMovement v1 = Find<NewMovement>();
             bool v1InNether = inGame && Coords.InNether && v1 != null && Coords.IsNetherUnity(v1.transform.position);
             Nether.Frame(v1InNether, v1 != null ? v1.cc : null);
-            NetherWorld.Frame(v1InNether && puppet && !mcFrozen && !v1.dead, v1 != null ? v1.transform.position : Vector3.zero);
+            NetherWorld.Frame(v1InNether && (puppet || netherFree) && !mcFrozen && !v1.dead, v1 != null ? v1.transform.position : Vector3.zero);
+            ThirdPerson();
+            HeldItems.Pose(v1 != null ? v1.cc : null);
+            SmileOs.Frame(inGame && haveMc && mcInWorld);
         }
 
         private void MoveV1()
@@ -611,13 +881,18 @@ namespace Killcraft
             {
                 return;
             }
-            if (puppet)
+            if (ultrakillDrives)
+            {
+                lastSetRoot = controlled.transform.position;  // ULTRAKILL moves it; Minecraft follows (Update)
+            }
+            else if (puppet)
             {
                 Interpolate(out double fx, out double fy, out double fz, out double eye);
-                Vector3 root = Coords.ToUnity(fx, fy, fz) + Vector3.up * Coords.FeetBelowRoot;
+                lastFeet = Coords.ToUnity(fx, fy, fz);
+                Vector3 root = lastFeet + Vector3.up * Coords.FeetBelowRoot;
                 controlled.transform.position = root;
                 controlled.rb.position = root;
-                controlled.cc.transform.position = Coords.ToUnity(fx, fy + eye, fz);
+                controlled.cc.transform.position = lastEye = Coords.ToUnity(fx, fy + eye, fz);
                 lastSetRoot = root;
             }
             else
@@ -682,7 +957,7 @@ namespace Killcraft
         {
             if (toggleNotice > 0f && toggleRefused)
             {
-                return "Killcraft: Minecraft can't be turned off in the Nether (go back through a Nether portal first)";
+                return "Killcraft: Minecraft can only be turned off in the Nether while standing on ground";
             }
             if (toggleNotice > 0f)
             {
@@ -722,7 +997,7 @@ namespace Killcraft
             {
                 return "Killcraft: Minecraft is opening its world...";
             }
-            if (arriving)
+            if (arriving && !ultrakillDrives)
             {
                 return $"Killcraft: sending the level to Minecraft ({Collision.SentRegions} regions)...";
             }

@@ -27,6 +27,17 @@ namespace Killcraft
             {
                 Plugin.Log.LogWarning($"Minecraft: couldn't update skycraft.properties: {e.Message}");
             }
+            InstallMod(game);
+            try
+            {
+                string app = Plugin.DiscordAppId.Value.Trim();
+                app = app.Length == 0 ? Plugin.KillcraftDiscordApp : app.Equals("skycraft", StringComparison.OrdinalIgnoreCase) ? "" : app;
+                SetDiscord(Path.Combine(installDir, "Prism", "instances", "SkyCraft", "instance.cfg"), app);
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogWarning($"Minecraft: couldn't set the Discord status: {e.Message}");
+            }
             string world = Path.Combine(game, "saves", "SkyCraft");
             if (!Directory.Exists(world))
             {
@@ -86,6 +97,8 @@ namespace Killcraft
                     return;
                 }
                 OncePerPlayer(players, Path.Combine(world, KitStamp), GiveTnt);
+                // Kept worlds get the starting kit's Potions of ULTRAKILL once too.
+                OncePerPlayer(players, Path.Combine(world, "killcraft-potion-kit2.txt"), GivePotions);
                 // Tools lost to the void (dropped while the player was stuck under the world).
                 OncePerPlayer(players, Path.Combine(world, "killcraft-tools-back.txt"), GiveToolsBack);
             }
@@ -159,6 +172,84 @@ namespace Killcraft
                 Plugin.Log.LogInfo("Minecraft: the player was saved in the Nether; it starts in the level");
             }
             return changed;
+        }
+
+        // Killcraft's own Minecraft mod (its items and blocks, see mcmod), shipped next to this plugin:
+        // put into the SkyCraft instance's mods, replacing an older one.
+        private const string ModJar = "killcraft-mc.jar";
+
+        private static void InstallMod(string game)
+        {
+            try
+            {
+                string source = Path.Combine(Path.GetDirectoryName(typeof(Plugin).Assembly.Location), ModJar);
+                if (!File.Exists(source))
+                {
+                    Plugin.Log.LogWarning($"Minecraft: no {ModJar} next to Killcraft: no Potion of ULTRAKILL or SMILEOS terminals in Minecraft");
+                    return;
+                }
+                string mods = Path.Combine(game, "mods");
+                Directory.CreateDirectory(mods);
+                string target = Path.Combine(mods, ModJar);
+                if (File.Exists(target) && new FileInfo(target).Length == new FileInfo(source).Length
+                    && File.ReadAllBytes(target).AsSpan().SequenceEqual(File.ReadAllBytes(source)))
+                {
+                    return;
+                }
+                File.Copy(source, target, true);
+                Plugin.Log.LogInfo($"Minecraft: installed Killcraft's mod ({ModJar})");
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogWarning($"Minecraft: couldn't install Killcraft's mod: {e.Message}");
+            }
+        }
+
+        // The Discord status (Plugin.DiscordAppId): Killcraft's mod shows Killcraft's, with SkyCraft's own
+        // turned off; both are Java options in the Prism instance's settings.
+        private static void SetDiscord(string cfg, string appId)
+        {
+            if (!File.Exists(cfg))
+            {
+                return;
+            }
+            string[] lines = File.ReadAllLines(cfg);
+            bool changed = false;
+            for (int i = 0; i < lines.Length; i++)
+            {
+                if (!lines[i].StartsWith("JvmArgs="))
+                {
+                    continue;
+                }
+                string value = lines[i].Substring("JvmArgs=".Length).Trim().Trim('"');
+                var args = new List<string>();
+                foreach (string a in value.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    if (!a.StartsWith("-Dskycraft.discordAppId=") && !a.StartsWith("-Dkillcraft.discordAppId="))
+                    {
+                        args.Add(a);
+                    }
+                }
+                if (appId.Length > 0)
+                {
+                    args.Add("-Dskycraft.discordAppId=0");
+                    if (appId != "0")
+                    {
+                        args.Add("-Dkillcraft.discordAppId=" + appId);
+                    }
+                }
+                string line = "JvmArgs=\"" + string.Join(" ", args) + "\"";
+                if (line != lines[i])
+                {
+                    lines[i] = line;
+                    changed = true;
+                }
+            }
+            if (changed)
+            {
+                File.WriteAllLines(cfg, lines);
+                Plugin.Log.LogInfo(appId.Length == 0 ? "Minecraft: Discord status is SkyCraft's" : appId == "0" ? "Minecraft: no Discord status" : "Minecraft: Discord status is Killcraft's");
+            }
         }
 
         // SkyCraft's "Skyrim destruction" setting (its pause menu button): mining and explosions dig
@@ -306,7 +397,7 @@ namespace Killcraft
                     "execute as @e[type=skycraft:skyrim_actor,name=!\"Killcraft arrow\"] at @s positioned ~ ~0.2 ~ if block ~ ~ ~ minecraft:lava run damage @s 4 minecraft:lava\n",
                 ["data/killcraft/function/spawn.mcfunction"] =
                     "scoreboard players add #spawn killcraft_timer 1\n" +
-                    "execute if score #spawn killcraft_timer matches 20.. as @a[nbt={OnGround:1b}] at @s if dimension minecraft:overworld run function killcraft:spawn_here\n" +
+                    "execute if score #spawn killcraft_timer matches 20.. as @a[nbt={OnGround:1b}] at @s if dimension minecraft:overworld unless block ~ ~ ~ minecraft:nether_portal unless block ~ ~1 ~ minecraft:nether_portal run function killcraft:spawn_here\n" +
                     "execute if score #spawn killcraft_timer matches 20.. run scoreboard players set #spawn killcraft_timer 0\n",
                 // (Also where a player who somehow got to the Nether without a portal goes back to.)
                 ["data/killcraft/function/spawn_here.mcfunction"] =
@@ -540,7 +631,10 @@ namespace Killcraft
             }
             // Files earlier versions wrote that are gone now (a bad advancement stops the world loading).
             foreach (string stale in new[] { "data/killcraft/advancement/thorns.json", "data/killcraft/function/nether_find.mcfunction",
-                "data/killcraft/function/nether_down.mcfunction", "data/killcraft/tags/block/nether_floor.json" })
+                "data/killcraft/function/nether_down.mcfunction", "data/killcraft/tags/block/nether_floor.json",
+                // the first Potion of ULTRAKILL, a data pack one (Killcraft's Minecraft mod has the real one now)
+                "data/killcraft/function/ukmoves.mcfunction", "data/killcraft/function/ukmoves_check.mcfunction",
+                "data/killcraft/function/potion.mcfunction", "data/killcraft/recipe/ultrakill_potion.json" })
             {
                 string path = Path.Combine(dir, stale.Replace('/', Path.DirectorySeparatorChar));
                 if (File.Exists(path))
@@ -587,6 +681,39 @@ namespace Killcraft
             Plugin.Log.LogInfo($"Minecraft: fresh world ({cleared} folders of saved blocks cleared, inventory reset to the starting kit)");
         }
 
+        // Killcraft's Minecraft mod's potion (see mcmod).
+        private static Nbt Potion(int count, int slot) => Stack("ultrakill_potion", count, slot, "killcraft");
+
+        private static bool GivePotions(Nbt root)
+        {
+            if (!(root.Get("Inventory") is Nbt inventory) || inventory.Type != Nbt.TList || !(inventory.Value is List<Nbt> items))
+            {
+                return false;
+            }
+            var used = new HashSet<int>();
+            foreach (Nbt item in items)
+            {
+                if (item.Get("Slot") is Nbt slot && slot.Type == Nbt.TByte)
+                {
+                    used.Add((sbyte)slot.Value);
+                }
+            }
+            for (int s = 0; s < 36; s++)
+            {
+                if (!used.Contains(s))
+                {
+                    items.Add(Potion(2, s));
+                    if (items.Count == 1)
+                    {
+                        inventory.ListType = Nbt.TCompound;
+                    }
+                    Plugin.Log.LogInfo("Minecraft: put 2 Potions of ULTRAKILL in the player's inventory");
+                    return true;
+                }
+            }
+            return false;
+        }
+
         private static readonly (string id, int count)[] Kit =
         {
             ("diamond_sword", 1), ("diamond_pickaxe", 1), ("bow", 1), ("cooked_beef", 32), ("oak_planks", 64), ("tnt", 64),
@@ -595,14 +722,14 @@ namespace Killcraft
             ("lantern", 16), ("crafting_table", 1), ("water_bucket", 1), ("golden_apple", 4),
         };
 
-        private static Nbt Stack(string id, int count, int slot = -1)
+        private static Nbt Stack(string id, int count, int slot = -1, string ns = "minecraft")
         {
             var stack = Nbt.Compound();
             if (slot >= 0)
             {
                 stack.Set("Slot", new Nbt(Nbt.TByte, (sbyte)slot));
             }
-            stack.Set("id", new Nbt(Nbt.TString, "minecraft:" + id));
+            stack.Set("id", new Nbt(Nbt.TString, ns + ":" + id));
             stack.Set("count", new Nbt(Nbt.TInt, count));
             return stack;
         }
@@ -614,6 +741,7 @@ namespace Killcraft
             {
                 items.Add(Stack(Kit[i].id, Kit[i].count, i));
             }
+            items.Add(Potion(2, Kit.Length));
             root.Set("Inventory", new Nbt(Nbt.TList, items) { ListType = Nbt.TCompound });
             var equipment = Nbt.Compound();
             equipment.Set("head", Stack("iron_helmet", 1));

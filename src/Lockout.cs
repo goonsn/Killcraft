@@ -14,11 +14,16 @@ namespace Killcraft
         private static bool locked;
         private static readonly List<InputAction> disabled = new List<InputAction>();
 
-        public static void Frame(bool minecraftHasPlayer)
+        // ultrakillMoves: a Potion of ULTRAKILL is working, so ULTRAKILL's movement keys stay on.
+        public static void Frame(bool minecraftHasPlayer, bool ultrakillMoves)
         {
             if (minecraftHasPlayer)
             {
-                Lock();
+                if (ultrakillMoves)
+                {
+                    FreeMovement();
+                }
+                Lock(ultrakillMoves);
             }
             else if (locked)
             {
@@ -26,7 +31,24 @@ namespace Killcraft
             }
         }
 
-        private static void Lock()
+        private static void FreeMovement()
+        {
+            if (MonoSingleton.GetInstance(typeof(InputManager)) is InputManager input && input.InputSource?.Actions != null)
+            {
+                InputActionMap movement = input.InputSource.Actions.Movement.Get();
+                disabled.RemoveAll(action =>
+                {
+                    if (action == null || action.actionMap != movement)
+                    {
+                        return false;
+                    }
+                    action.Enable();
+                    return true;
+                });
+            }
+        }
+
+        private static void Lock(bool ultrakillMoves)
         {
             locked = true;
             if (MonoSingleton.GetInstance(typeof(InputManager)) is InputManager input && input.InputSource?.Actions != null)
@@ -34,7 +56,7 @@ namespace Killcraft
                 var actions = input.InputSource.Actions;
                 foreach (InputActionMap map in new InputActionMap[] { actions.Movement, actions.Fist, actions.Weapon, actions.HUD })
                 {
-                    if (map == null)
+                    if (map == null || (ultrakillMoves && map == actions.Movement.Get()))
                     {
                         continue;
                     }
@@ -75,9 +97,14 @@ namespace Killcraft
                 }
                 // Some things bring an arm out without equipping it (SMILEOS terminals' tap
                 // animation, an arm refreshed for a parry): every arm stays put away.
+                // (But the arm holding a shown skull: active, invisible, for its holding animation.)
                 foreach (UnityEngine.GameObject arm in spawnedArms(fists))
                 {
-                    if (arm != null && arm.activeSelf)
+                    if (arm != null && arm == HeldItems.GhostArm)
+                    {
+                        arm.SetActive(true);
+                    }
+                    else if (arm != null && arm.activeSelf)
                     {
                         arm.SetActive(false);
                     }

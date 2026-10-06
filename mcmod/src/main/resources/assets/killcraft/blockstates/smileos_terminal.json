@@ -1,0 +1,8 @@
+{
+  "variants": {
+    "facing=north": { "model": "killcraft:block/smileos_terminal" },
+    "facing=east": { "model": "killcraft:block/smileos_terminal", "y": 90 },
+    "facing=south": { "model": "killcraft:block/smileos_terminal", "y": 180 },
+    "facing=west": { "model": "killcraft:block/smileos_terminal", "y": 270 }
+  }
+}

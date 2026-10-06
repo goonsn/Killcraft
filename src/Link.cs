@@ -17,6 +17,7 @@ namespace Killcraft
         public double PrevX, PrevY, PrevZ, CurX, CurY, CurZ;
         public float TickEyeO, TickEye, TickMs;
         public uint CameraMode;
+        public float CameraDistance;
     }
 
     internal struct SkyState
@@ -187,6 +188,7 @@ namespace Killcraft
                 m.TickEye = F32(o + Proto.MsTickEye);
                 m.TickMs = F32(o + Proto.MsTickMs);
                 m.CameraMode = U32(o + Proto.MsCameraMode);
+                m.CameraDistance = F32(o + Proto.MsCameraDistance);
                 Thread.MemoryBarrier();
                 if (Volatile.Read(ref I32(o + Proto.MsSeq)) == s1)
                 {

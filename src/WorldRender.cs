@@ -387,6 +387,15 @@ namespace Killcraft
                     case Proto.RenTexture:
                         OnTexture(p, bytes);
                         break;
+                    case Proto.RenAvatar:
+                        if (avatarBuf.Length < bytes)
+                        {
+                            avatarBuf = new byte[Math.Max(bytes, avatarBuf.Length * 2)];
+                        }
+                        System.Runtime.InteropServices.Marshal.Copy((IntPtr)p, avatarBuf, 0, bytes);
+                        avatarLen = bytes;
+                        avatarNew = true;
+                        break;
                     case Proto.RenScene:
                         if (sceneBuf.Length < bytes)
                         {
@@ -487,40 +496,85 @@ namespace Killcraft
 
         // RenScene: origin (3 doubles), batch count, vertex count, RenBatch[] (texture, first, count,
         // flags), RenVertex[] relative to the origin.
+        // RenAvatar (Minecraft's own player, sent in third person): the same without the origin,
+        // relative to the player's feet; built in place and moved with the player (PlaceAvatar).
         private static void BuildScene()
         {
-            if (!sceneNew)
+            if (sceneNew)
+            {
+                sceneNew = false;
+                BuildBatches(sceneBuf, sceneLen, true, ref sceneGo, ref sceneMesh, "Minecraft scene");
+            }
+            if (avatarNew)
+            {
+                avatarNew = false;
+                BuildBatches(avatarBuf, avatarLen, false, ref avatarGo, ref avatarMesh, "Minecraft player");
+                if (avatarGo != null && !avatarShown)
+                {
+                    avatarGo.SetActive(false);
+                }
+            }
+        }
+
+        private static byte[] avatarBuf = new byte[0];
+        private static int avatarLen;
+        private static bool avatarNew, avatarShown;
+        private static GameObject avatarGo;
+        private static Mesh avatarMesh;
+
+        // Where Minecraft's player model goes (its feet), or hidden.
+        public static void PlaceAvatar(bool show, Vector3 feet)
+        {
+            avatarShown = show;
+            if (avatarGo == null)
             {
                 return;
             }
-            sceneNew = false;
-            if (sceneGo == null)
+            if (!show)
             {
-                sceneMesh = new Mesh { name = "Minecraft scene", indexFormat = IndexFormat.UInt32 };
-                sceneMesh.MarkDynamic();
-                sceneGo = new GameObject("Minecraft scene");
-                sceneGo.transform.SetParent(Root, false);
-                sceneGo.AddComponent<MeshFilter>().sharedMesh = sceneMesh;
-                var mr = sceneGo.AddComponent<MeshRenderer>();
+                avatarGo.SetActive(false);
+                return;
+            }
+            avatarGo.transform.position = feet;
+            if (!avatarGo.activeSelf && avatarMesh != null && avatarMesh.vertexCount > 0)
+            {
+                avatarGo.SetActive(true);
+            }
+        }
+
+        private static void BuildBatches(byte[] buf, int len, bool withOrigin, ref GameObject go, ref Mesh mesh, string name)
+        {
+            if (go == null)
+            {
+                mesh = new Mesh { name = name, indexFormat = IndexFormat.UInt32 };
+                mesh.MarkDynamic();
+                go = new GameObject(name);
+                go.transform.SetParent(Root, false);
+                go.AddComponent<MeshFilter>().sharedMesh = mesh;
+                var mr = go.AddComponent<MeshRenderer>();
                 mr.shadowCastingMode = ShadowCastingMode.Off;
             }
+            GameObject sceneGo = go;
+            Mesh sceneMesh = mesh;
+            int head = withOrigin ? 24 : 0;
+            float u = Coords.U;
             sv.Clear();
             suv.Clear();
             sc.Clear();
             sMats.Clear();
             flashIdx.Clear();
             int used = 0;
-            fixed (byte* p = sceneBuf)
+            fixed (byte* p = buf)
             {
-                if (sceneLen < 32)
+                if (len < head + 8)
                 {
                     sceneGo.SetActive(false);
                     return;
                 }
-                double ox = *(double*)p, oy = *(double*)(p + 8), oz = *(double*)(p + 16);
-                int batches = *(int*)(p + 24), vertices = *(int*)(p + 28);
-                byte* vb = p + 32 + batches * 16;
-                if (batches <= 0 || vertices <= 0 || 32 + batches * 16 + (long)vertices * 32 > sceneLen)
+                double ox = withOrigin ? *(double*)p : 0, oy = withOrigin ? *(double*)(p + 8) : 0, oz = withOrigin ? *(double*)(p + 16) : 0;
+                int batches = *(int*)(p + head), vertices = *(int*)(p + head + 4);
+                byte* vb = p + head + 8 + batches * 16;
+                if (batches <= 0 || vertices <= 0 || head + 8 + batches * 16 + (long)vertices * 32 > len)
                 {
                     sceneGo.SetActive(false);
                     return;
@@ -536,7 +590,7 @@ namespace Killcraft
                 Array.Clear(blockAtlasVertex, 0, vertices);
                 for (int b = 0; b < batches; b++)
                 {
-                    byte* hdr = p + 32 + b * 16;
+                    byte* hdr = p + head + 8 + b * 16;
                     int first = *(int*)(hdr + 4), count = *(int*)(hdr + 8);
                     if (*(uint*)hdr == 0 && first >= 0 && count > 0 && first + count <= vertices)
                     {
@@ -549,7 +603,8 @@ namespace Killcraft
                 for (int i = 0; i < vertices; i++)
                 {
                     byte* v = vb + i * 32;
-                    sv.Add(Coords.ToUnity(ox + *(float*)v, oy + *(float*)(v + 4), oz + *(float*)(v + 8)));
+                    sv.Add(withOrigin ? Coords.ToUnity(ox + *(float*)v, oy + *(float*)(v + 4), oz + *(float*)(v + 8))
+                        : new Vector3(*(float*)v * u, *(float*)(v + 4) * u, -*(float*)(v + 8) * u));
                     suv.Add(new Vector2(*(float*)(v + 12), *(float*)(v + 16)));
                     uint c = *(uint*)(v + 20), light = *(uint*)(v + 24), flags = *(uint*)(v + 28);
                     float k = faceShade[(flags >> 4) & 7] * (0.3f + 0.7f * Mathf.Max(LightCurve((int)(light & 0xFF)), LightCurve((int)((light >> 8) & 0xFF))));
@@ -560,7 +615,7 @@ namespace Killcraft
                 }
                 for (int b = 0; b < batches; b++)
                 {
-                    byte* hdr = p + 32 + b * 16;
+                    byte* hdr = p + head + 8 + b * 16;
                     uint texture = *(uint*)hdr;
                     int first = *(int*)(hdr + 4), count = *(int*)(hdr + 8);
                     uint flags = *(uint*)(hdr + 12);

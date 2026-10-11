@@ -184,6 +184,13 @@ namespace Killcraft
             // Where the skull is in the hand, seen from the camera, then mirrored left to right: taken
             // once the arm has settled into holding it (its pick-up, a punch or sway would move it
             // about), and kept like that from then on.
+            // Put down meanwhile (on its altar): it stays there, not shown any more.
+            if (shown != fists.heldObject)
+            {
+                shown = null;
+                EndGhost();
+                return;
+            }
             // (The arm switched on again, Punch.OnEnable, takes it back into its hand.)
             if (shown.transform.parent != view)
             {

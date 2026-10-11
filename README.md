@@ -26,7 +26,7 @@ It works like [SkyCraft](https://github.com/chasmlol/SkyCraft) (Minecraft inside
 - Your Discord status shows Killcraft while you play.
 - Bosses hit harder the higher ULTRAKILL's difficulty, and go through armour (see the settings).
 - Jump pads launch you (the Cybergrind's too), and crouching stops you at edges, so you can bridge.
-- Shields block ULTRAKILL's attacks, thorns armour hurts ULTRAKILL's enemies, and a swing parries projectiles (Stray energy balls, ...) like V1's punch.
+- Shields block ULTRAKILL's attacks, thorns armour hurts ULTRAKILL's enemies, and a swing parries projectiles (Stray energy balls, ...) like V1's punch, and parrying the same one again and again sends it back harder each time.
 - SMILEOS terminals and shops can be clicked.
 - Potion effects work on the Minecraft player (speed, jump boost, strength, resistance, regeneration, ...).
 - Dying in Minecraft is dying in ULTRAKILL (and the other way round). You respawn at ULTRAKILL's checkpoint.
@@ -54,7 +54,7 @@ Minecraft's own controls (WASD, space, shift, mouse buttons, 1-9, E for the inve
 
 | Key | |
 |---|---|
-| **F9** | Turn Minecraft off (plain ULTRAKILL with your guns) and back on |
+| **F9** | Turn Minecraft off (plain ULTRAKILL with your guns) and back on (if it does nothing, check your keyboard's Fn lock, or pick another key with `ToggleMinecraft`) |
 | **F5** | Third person (behind you, then in front, then back to first person) |
 | **O** | Minecraft's menu (options, ...) |
 | **Esc** | ULTRAKILL's pause menu, which pauses Minecraft too and mutes its sound (or closes an open Minecraft screen) |

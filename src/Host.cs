@@ -134,7 +134,12 @@ namespace Killcraft
             // The toggle key: Minecraft off (plain ULTRAKILL, Minecraft's player waits where it is) or
             // back on (Minecraft's player comes to V1 and takes over again).
             var keyboard = UnityEngine.InputSystem.Keyboard.current;
-            if (keyboard != null && inGame && !paused && !(Patches.OwnsPlayer && Patches.McScreenOpen) && ToggleKey(keyboard))
+            bool togglePressed = ToggleKey();
+            if (togglePressed && !(inGame && !paused && !(Patches.OwnsPlayer && Patches.McScreenOpen)))
+            {
+                Plugin.Log.LogInfo($"{Plugin.ToggleKey.Value} pressed but ignored: in a level {inGame}, paused {paused}, a Minecraft screen open {Patches.OwnsPlayer && Patches.McScreenOpen}");
+            }
+            if (togglePressed && inGame && !paused && !(Patches.OwnsPlayer && Patches.McScreenOpen))
             {
                 toggleNotice = 3f;
                 // (In the Nether only over ground: there it's Killcraft's colliders from Minecraft's blocks
@@ -446,7 +451,8 @@ namespace Killcraft
                 nm.deathSequence.gameObject.SetActive(false);
             }
             Patches.OwnsPlayer = controlled != null;
-            Lockout.Frame(controlled != null, ultrakillDrives);
+            // (A Minecraft screen open, as typing a command or the inventory: the keys are Minecraft's.)
+            Lockout.Frame(controlled != null, ultrakillDrives && !screenOpen);
             HeldItems.Frame(controlled != null, nm != null ? nm.cc : null);
             HurtZones.Frame(nm, controlled != null && nm != null && nm.rb != null && nm.rb.isKinematic && inGame && !loading);
             // (Also when ULTRAKILL has V1 — toggled off, dead: Minecraft's mobs and TNT carry on otherwise.)
@@ -457,7 +463,7 @@ namespace Killcraft
 
             // (Respawning puts Minecraft's player at its spawn point: Killcraft's data pack keeps that
             // where the player last stood, so a death is a short move. See McSave.)
-            InputForward.UltrakillMoves = ultrakillDrives;
+            InputForward.UltrakillMoves = ultrakillDrives && !screenOpen;
             InputForward.Frame(controlled != null && puppet && !paused && !McCommand.Busy, screenOpen, Screen.width, Screen.height);
             // (Also while Minecraft is on its way to V1, as through a Nether portal: no flash of ULTRAKILL's HUD.)
             HudHider.Frame(controlled != null, nm);
@@ -941,7 +947,14 @@ namespace Killcraft
         private float toggleNotice;
         private UnityEngine.InputSystem.Key toggleKey = UnityEngine.InputSystem.Key.None;
 
-        private bool ToggleKey(UnityEngine.InputSystem.Keyboard keyboard)
+        // The toggle key, on any keyboard Unity knows (keyboard software, as Razer's, adds keyboards of
+        // its own, and Keyboard.current is only the last one used), or else as Windows has it (a key
+        // that never reaches Unity's input at all). One press, however it's seen, toggles once.
+        private bool asyncDown;
+        private float lastTogglePress = -100f;
+        private bool loggedAsyncToggle;
+
+        private bool ToggleKey()
         {
             if (toggleKey == UnityEngine.InputSystem.Key.None)
             {
@@ -950,8 +963,40 @@ namespace Killcraft
                     toggleKey = UnityEngine.InputSystem.Key.F9;
                 }
             }
-            var control = keyboard[toggleKey];
-            return control != null && control.wasPressedThisFrame;
+            bool pressed = false;
+            foreach (UnityEngine.InputSystem.InputDevice device in UnityEngine.InputSystem.InputSystem.devices)
+            {
+                if (device is UnityEngine.InputSystem.Keyboard kb && kb.enabled && kb[toggleKey] is var control && control != null && control.wasPressedThisFrame)
+                {
+                    pressed = true;
+                    break;
+                }
+            }
+            int vk = toggleKey >= UnityEngine.InputSystem.Key.F1 && toggleKey <= UnityEngine.InputSystem.Key.F12 ? 0x70 + (toggleKey - UnityEngine.InputSystem.Key.F1)
+                : toggleKey >= UnityEngine.InputSystem.Key.A && toggleKey <= UnityEngine.InputSystem.Key.Z ? 0x41 + (toggleKey - UnityEngine.InputSystem.Key.A) : 0;
+            if (vk != 0)
+            {
+                bool down = Application.isFocused && (Native.GetAsyncKeyState(vk) & 0x8000) != 0;
+                if (down && !asyncDown && !pressed && Time.unscaledTime - lastTogglePress > 0.3f)
+                {
+                    pressed = true;
+                    if (!loggedAsyncToggle)
+                    {
+                        loggedAsyncToggle = true;
+                        Plugin.Log.LogInfo($"{toggleKey}: Windows has it pressed, but ULTRAKILL's input never saw it (keyboard software?); taken from Windows");
+                    }
+                }
+                asyncDown = down;
+            }
+            if (pressed)
+            {
+                if (Time.unscaledTime - lastTogglePress < 0.3f)
+                {
+                    return false;  // (the same press, seen the other way too)
+                }
+                lastTogglePress = Time.unscaledTime;
+            }
+            return pressed;
         }
 
         private string StatusText()

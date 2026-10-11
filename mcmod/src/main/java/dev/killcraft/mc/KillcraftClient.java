@@ -35,6 +35,11 @@ public final class KillcraftClient implements ClientModInitializer {
 	}
 
 	private static void tick(Minecraft minecraft) {
+		// ULTRAKILL paused (Minecraft's world frozen): the player's effects keep queueing their
+		// particles meanwhile, which would all burst out on unpausing. They go instead.
+		if (minecraft.level != null && minecraft.level.tickRateManager().isFrozen()) {
+			minecraft.particleEngine.clearParticles();
+		}
 		if (holdPos == null || minecraft.player == null || minecraft.level == null || minecraft.level.dimension() != Level.NETHER) {
 			return;
 		}

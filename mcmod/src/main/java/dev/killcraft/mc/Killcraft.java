@@ -41,7 +41,7 @@ import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
  * Killcraft has to know about them, sent over SkyCraft's link (events past SkyCraft's own types).
  */
 public final class Killcraft implements ModInitializer {
-	static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger("killcraft");
+	public static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger("killcraft");
 	public static final String MOD_ID = "killcraft";
 
 	/** Killcraft's events (Proto.EvKc* on the ULTRAKILL side). */
@@ -162,7 +162,8 @@ public final class Killcraft implements ModInitializer {
 			// (with the ULTRAKILL effect, or following V1).
 			if (player.level().getBlockState(player.blockPosition()).is(Blocks.NETHER_PORTAL)) {
 				Link.push(EV_ULTRAKILL_STOP, 0, 0, 0, 0, 0);
-			} else if (player.hasEffect(ULTRAKILL) && ticks % 10 == 0) {
+			} else if (player.hasEffect(ULTRAKILL) && !player.isCreative() && !player.isSpectator() && ticks % 10 == 0) {
+				// (Not in creative or spectator: flying and noclip are Minecraft's.)
 				Link.push(EV_ULTRAKILL_MOVES, 0, 0, 0, 0, 0);
 			}
 		}

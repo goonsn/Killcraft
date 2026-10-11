@@ -510,6 +510,9 @@ namespace Killcraft
         [DllImport("kernel32")]
         public static extern bool CloseHandle(IntPtr handle);
 
+        [DllImport("user32")]
+        public static extern short GetAsyncKeyState(int virtualKey);
+
         [DllImport("kernel32")]
         public static extern ulong GetTickCount64();
 

@@ -26,10 +26,11 @@ namespace KillNetLauncher
         {
             public string Version = "";
             public string Tag = "";
-            public string FullUrl, FullName;      // Killcraft-<v>.zip: the mod with Minecraft's parts
-            public string NetUrl, NetName;        // KillNet-<v>.zip: multiplayer only (smaller)
+            // (Each download's URLs: GitHub's API one first, then the plain one; see Fetch.)
+            public string[] FullUrl; public string FullName;  // Killcraft-<v>.zip: the mod with Minecraft's parts
+            public string[] NetUrl; public string NetName;    // KillNet-<v>.zip: multiplayer only (smaller)
             public long FullSize, NetSize;
-            public string LauncherVersion, LauncherUrl;  // KillNet-Launcher-<v>.exe, the newest in any release
+            public string LauncherVersion; public string[] LauncherUrl;  // KillNet-Launcher-<v>.exe, the newest in any release
             public string Notes = "", Page = "";          // its notes (GitHub's markdown) and its page
         }
 
@@ -175,7 +176,8 @@ namespace KillNetLauncher
         public static Task<Release> LatestRelease() => Task.Run(() =>
         {
             Release rel = null;
-            string bestLauncher = null, bestLauncherUrl = null;
+            string bestLauncher = null;
+            string[] bestLauncherUrl = null;
             var launcher = new Regex(@"^KillNet-Launcher-(\d+(?:\.\d+)*)\.exe$", RegexOptions.IgnoreCase);
             foreach (Dictionary<string, object> r in (IEnumerable)GetJson($"https://api.github.com/repos/{Repo}/releases?per_page=20"))
             {
@@ -185,11 +187,12 @@ namespace KillNetLauncher
                 }
                 var here = new Release { Tag = r["tag_name"] as string ?? "", Notes = r["body"] as string ?? "", Page = r["html_url"] as string ?? "" };
                 here.Version = here.Tag.TrimStart('v', 'V');
-                string lv = null, lu = null;
+                string lv = null;
+                string[] lu = null;
                 foreach (Dictionary<string, object> a in assets)
                 {
                     string name = a["name"] as string ?? "";
-                    string url = a["browser_download_url"] as string;
+                    string[] url = Urls(a);
                     long size = Convert.ToInt64(a["size"]);
                     Match m = launcher.Match(name);
                     if (m.Success)
@@ -258,12 +261,7 @@ namespace KillNetLauncher
         public static async Task UpdateLauncher(Release rel, Action<string, int> progress)
         {
             string exe = Exe, fresh = exe + ".new", old = exe + ".old";
-            using (var web = new WebClient())
-            {
-                web.Headers[HttpRequestHeader.UserAgent] = UserAgent;
-                web.DownloadProgressChanged += (s, e) => progress("UPDATING LAUNCHER", e.ProgressPercentage);
-                await web.DownloadFileTaskAsync(new Uri(rel.LauncherUrl), fresh);
-            }
+            await Fetch(rel.LauncherUrl, fresh, p => progress("UPDATING LAUNCHER", p));
             if (new FileInfo(fresh).Length < 100000)
             {
                 File.Delete(fresh);
@@ -311,17 +309,66 @@ namespace KillNetLauncher
 
         private static int[] Parts(string v) => Regex.Matches(v, "\\d+").Cast<Match>().Select(m => int.Parse(m.Value)).ToArray();
 
-        private static async Task<string> Download(string url, string name, Action<string, int> progress, string what)
+        // A release asset's URLs: GitHub's API one (asks for the file itself), then the plain download link.
+        // (The plain links have failed on their own: 504 for every .exe on GitHub while zips still came.)
+        private static string[] Urls(Dictionary<string, object> asset)
+        {
+            var urls = new List<string>();
+            foreach (string key in new[] { "url", "browser_download_url" })
+            {
+                if (asset.TryGetValue(key, out object v) && v is string u && u.Length > 0)
+                {
+                    urls.Add(u);
+                }
+            }
+            return urls.ToArray();
+        }
+
+        // The file from the first URL that gives it; the last one's error if none does.
+        public static async Task Fetch(string[] urls, string file, Action<int> progress)
+        {
+            Exception last = new Exception("no download link");
+            foreach (string url in urls ?? new string[0])
+            {
+                try
+                {
+                    using (var web = new WebClient())
+                    {
+                        web.Headers[HttpRequestHeader.UserAgent] = UserAgent;
+                        if (url.StartsWith("https://api.github.com/", StringComparison.OrdinalIgnoreCase))
+                        {
+                            web.Headers[HttpRequestHeader.Accept] = "application/octet-stream";
+                        }
+                        web.DownloadProgressChanged += (s, e) => progress(e.ProgressPercentage);
+                        await web.DownloadFileTaskAsync(new Uri(url), file);
+                    }
+                    if (new FileInfo(file).Length > 0)
+                    {
+                        return;
+                    }
+                    last = new Exception("the download came empty");
+                }
+                catch (Exception e)
+                {
+                    last = e;
+                }
+                try
+                {
+                    File.Delete(file);
+                }
+                catch (Exception)
+                {
+                }
+            }
+            throw last;
+        }
+
+        private static async Task<string> Download(string[] urls, string name, Action<string, int> progress, string what)
         {
             string folder = Path.Combine(Path.GetTempPath(), "KillNet");
             Directory.CreateDirectory(folder);
             string file = Path.Combine(folder, name);
-            using (var web = new WebClient())
-            {
-                web.Headers[HttpRequestHeader.UserAgent] = UserAgent;
-                web.DownloadProgressChanged += (s, e) => progress(what, e.ProgressPercentage);
-                await web.DownloadFileTaskAsync(new Uri(url), file);
-            }
+            await Fetch(urls, file, p => progress(what, p));
             return file;
         }
 
@@ -330,7 +377,8 @@ namespace KillNetLauncher
         public static async Task InstallBepInEx(string game, Action<string, int> progress)
         {
             progress("FINDING BEPINEX", -1);
-            string url = null, name = null;
+            string[] url = null;
+            string name = null;
             await Task.Run(() =>
             {
                 foreach (Dictionary<string, object> r in (IEnumerable)GetJson("https://api.github.com/repos/BepInEx/BepInEx/releases?per_page=40"))
@@ -345,7 +393,7 @@ namespace KillNetLauncher
                         string n = a["name"] as string ?? "";
                         if ((n.StartsWith("BepInEx_win_x64_5") || n.StartsWith("BepInEx_x64_5")) && n.EndsWith(".zip"))
                         {
-                            url = a["browser_download_url"] as string;
+                            url = Urls(a);
                             name = n;
                             return;
                         }
@@ -363,7 +411,7 @@ namespace KillNetLauncher
 
         public static async Task InstallMod(string game, Release rel, bool minecraft, Action<string, int> progress)
         {
-            string url = minecraft ? rel.FullUrl : rel.NetUrl;
+            string[] url = minecraft ? rel.FullUrl : rel.NetUrl;
             string name = minecraft ? rel.FullName : rel.NetName;
             if (url == null)
             {

@@ -46,6 +46,25 @@ namespace KillNetLauncher
                 {
                     Installer.Release r = Installer.LatestRelease().Result;
                     lines.Add($"latest: {r.Tag} ({r.Version}) full={r.FullName} ({r.FullSize}) net={r.NetName}");
+                    lines.Add($"launcher: {r.LauncherVersion} via {string.Join(" | ", r.LauncherUrl ?? new string[0])}");
+                    // (KillNet.exe --check out.txt fetch: also downloads the launcher and the multiplayer zip.)
+                    if (Array.IndexOf(args, "fetch") >= 0)
+                    {
+                        foreach (var (what, urls) in new[] { ("launcher", r.LauncherUrl), ("net zip", r.NetUrl) })
+                        {
+                            string f = System.IO.Path.GetTempFileName();
+                            try
+                            {
+                                Installer.Fetch(urls, f, p => { }).Wait();
+                                lines.Add($"fetch {what}: {new System.IO.FileInfo(f).Length} B");
+                            }
+                            catch (Exception e)
+                            {
+                                lines.Add($"fetch {what}: failed " + e.GetBaseException().Message);
+                            }
+                            System.IO.File.Delete(f);
+                        }
+                    }
                 }
                 catch (Exception e)
                 {

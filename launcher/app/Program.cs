@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Threading;
 using System.Windows.Forms;
 
@@ -65,6 +66,31 @@ namespace KillNetLauncher
                             System.IO.File.Delete(f);
                         }
                     }
+                    // (... install: installs the full download into a scratch folder, saying how far it got.)
+                    if (Array.IndexOf(args, "install") >= 0)
+                    {
+                        string dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "KillNet-installtest");
+                        var said = new System.Collections.Generic.List<string>();
+                        try
+                        {
+                            Installer.InstallMod(dir, r, true, (what, p) => { lock (said) { said.Add($"{what} {p}"); } }).Wait();
+                            lines.Add($"install: ok, {said.Count} steps: {string.Join(", ", said.Where((x, i) => i % 15 == 0 || i == said.Count - 1))}");
+                            lines.Add("install: version.txt " + Installer.ModVersion(dir) + ", minecraft parts " + Installer.HasMinecraftParts(dir));
+                        }
+                        catch (Exception e)
+                        {
+                            lines.Add("install: failed " + e.GetBaseException().Message);
+                        }
+                        try
+                        {
+                            System.IO.Directory.Delete(dir, true);
+                        }
+                        catch (Exception)
+                        {
+                        }
+                    }
+                    lines.Add("mod manager copy: " + (Installer.ModManagerCopy() ?? "none"));
+                    lines.Add("minecraft signed in: " + Installer.MinecraftSignedIn());
                 }
                 catch (Exception e)
                 {

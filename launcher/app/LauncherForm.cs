@@ -65,6 +65,9 @@ namespace KillNetLauncher
         private float statusAt = -100f, linesAt = float.NaN;
         private int progress = -1;
         private float repairAskedAt = -100f;
+        // (The mod in r2modman / Thunderstore's app / Gale and not here: PLAY says so first, see Play.)
+        private string modManager;
+        private float managerAskedAt = -100f;
         // (The update check, as the boot screen shows it: when it came back, what it said.)
         private float updateKnownAt = float.PositiveInfinity;
         private string updateResult;
@@ -342,6 +345,7 @@ namespace KillNetLauncher
             bepinex = Installer.IsGame(game) ? Installer.BepInExVersion(game) : null;
             mod = Installer.IsGame(game) ? Installer.ModVersion(game) : null;
             hasMcParts = Installer.IsGame(game) && Installer.HasMinecraftParts(game);
+            modManager = mod == null ? Installer.ModManagerCopy() : null;
         }
 
         private void Say(string text, int pct = -1)
@@ -442,7 +446,12 @@ namespace KillNetLauncher
                         return;
                     }
                 }
-                if (mod == null)
+                if (mod == null && modManager != null)
+                {
+                    Say($"{BrandName} FOUND IN {modManager}");
+                    SetUpdate(latest.Version + " OUT", Color.White);
+                }
+                else if (mod == null)
                 {
                     Say("PRESS PLAY TO INSTALL " + latest.Version);
                     SetUpdate(latest.Version + " TO INSTALL", Color.White);
@@ -527,6 +536,20 @@ namespace KillNetLauncher
             {
                 return;
             }
+            // (Installed by a mod manager: that starts the game with its own profile, so a second copy here
+            // is only wanted when asked for: PLAY again.)
+            if (mod == null && modManager != null && T - managerAskedAt > 8f)
+            {
+                managerAskedAt = T;
+                string first = "START IT FROM " + modManager;
+                Say(first);
+                await Task.Delay(2500);
+                if (status == first)
+                {
+                    Say("OR PRESS PLAY AGAIN TO INSTALL HERE");
+                }
+                return;
+            }
             busy = true;
             try
             {
@@ -558,8 +581,18 @@ namespace KillNetLauncher
                     }
                 }
                 Installer.SetMinecraft(game, settings.Minecraft);
+                // (Killcraft's first start: Prism asks for a Microsoft account. Said here, and the launcher
+                // stays open with it.)
+                bool signIn = settings.Minecraft && !Installer.MinecraftSignedIn();
                 Say(settings.Minecraft ? "LAUNCHING - WITH MINECRAFT" : "LAUNCHING - MULTIPLAYER ONLY");
+                Installer.MarkLaunch(game);
                 Installer.StartGame();
+                if (signIn)
+                {
+                    await Task.Delay(1500);
+                    Say("SIGN IN TO MINECRAFT WHEN PRISM OPENS");
+                    return;
+                }
                 if (settings.CloseOnPlay)
                 {
                     await Task.Delay(2500);
@@ -617,7 +650,7 @@ namespace KillNetLauncher
                     }
                     await Installer.InstallMod(settings.GamePath, latest, settings.Minecraft || hasMcParts, Progress);
                     Refresh();
-                    Say($"KILLNET {latest.Version} INSTALLED");
+                    Say($"{BrandName} {latest.Version} INSTALLED");
                     Sfx.Play(Sfx.Done);
                 }
                 else

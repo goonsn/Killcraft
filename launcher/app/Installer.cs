@@ -157,6 +157,52 @@ namespace KillNetLauncher
         // Minecraft's parts there (installed from the full Killcraft download).
         public static bool HasMinecraftParts(string game) => File.Exists(Path.Combine(ModFolder(game), "SkyCraft-Minecraft.zip"));
 
+        // Signed in to Minecraft in SkyCraft's Prism (the mod unpacks it to %LOCALAPPDATA%\SkyCraft; the
+        // first Killcraft start asks for a Microsoft account there).
+        public static bool MinecraftSignedIn() => File.Exists(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SkyCraft", "Prism", "accounts.json"));
+
+        // The mod in a mod manager's profile (r2modman, Thunderstore's app, Gale: Thunderstore installs go
+        // there, not into the game's folder; the manager starts the game with that profile). Its name, or null.
+        public static string ModManagerCopy()
+        {
+            string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            var managers = new[]
+            {
+                ("R2MODMAN", Path.Combine(appData, "r2modmanPlus-local", "ULTRAKILL", "profiles")),
+                ("THUNDERSTORE APP", Path.Combine(appData, "Thunderstore Mod Manager", "DataFolder", "ULTRAKILL", "profiles")),
+                ("GALE", Path.Combine(appData, "com.kesomannen.gale", "ultrakill", "profiles")),
+            };
+            foreach (var (name, profiles) in managers)
+            {
+                try
+                {
+                    if (!Directory.Exists(profiles))
+                    {
+                        continue;
+                    }
+                    foreach (string profile in Directory.GetDirectories(profiles))
+                    {
+                        string plugins = Path.Combine(profile, "BepInEx", "plugins");
+                        if (!Directory.Exists(plugins))
+                        {
+                            continue;
+                        }
+                        foreach (string package in Directory.GetDirectories(plugins))
+                        {
+                            if (File.Exists(Path.Combine(package, "Killcraft.dll")) || Directory.GetDirectories(package).Any(d => File.Exists(Path.Combine(d, "Killcraft.dll"))))
+                            {
+                                return name;
+                            }
+                        }
+                    }
+                }
+                catch (Exception)
+                {
+                }
+            }
+            return null;
+        }
+
         public static string OpenableModFolder(string game) => Directory.Exists(ModFolder(game)) ? ModFolder(game) : game;
 
         // ---- GitHub ----
@@ -406,7 +452,7 @@ namespace KillNetLauncher
             }
             string zip = await Download(url, name, progress, "DOWNLOADING BEPINEX");
             progress("INSTALLING BEPINEX", -1);
-            await Task.Run(() => Extract(zip, game, null));
+            await Task.Run(() => Extract(zip, game, null, p => progress("INSTALLING BEPINEX", p)));
         }
 
         public static async Task InstallMod(string game, Release rel, bool minecraft, Action<string, int> progress)
@@ -418,22 +464,25 @@ namespace KillNetLauncher
                 throw new Exception($"no download in release {rel.Tag}");
             }
             string zip = await Download(url, name, progress, $"DOWNLOADING {rel.Version}");
-            progress("INSTALLING " + rel.Version, -1);
+            progress("INSTALLING " + rel.Version, 0);
             await Task.Run(() =>
             {
                 string plugins = Path.Combine(game, "BepInEx", "plugins");
                 Directory.CreateDirectory(plugins);
-                Extract(zip, plugins, "Killcraft/");
+                Extract(zip, plugins, "Killcraft/", p => progress("INSTALLING " + rel.Version, p));
                 File.WriteAllText(Path.Combine(ModFolder(game), "version.txt"), rel.Version);
             });
         }
 
         // Each file of the zip into the folder (only those under `only`, when given); nothing outside it.
-        private static void Extract(string zip, string into, string only)
+        // (How far, by bytes written, as they're written: the full download is mostly one big file,
+        // SkyCraft's Minecraft.)
+        private static void Extract(string zip, string into, string only, Action<int> progress)
         {
             string root = Path.GetFullPath(into);
             using (ZipArchive z = ZipFile.OpenRead(zip))
             {
+                var files = new List<(ZipArchiveEntry entry, string target)>();
                 foreach (ZipArchiveEntry e in z.Entries)
                 {
                     string name = e.FullName.Replace('\\', '/');
@@ -442,12 +491,34 @@ namespace KillNetLauncher
                         continue;
                     }
                     string target = Path.GetFullPath(Path.Combine(root, name.Replace('/', Path.DirectorySeparatorChar)));
-                    if (!target.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                    if (target.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
                     {
-                        continue;
+                        files.Add((e, target));
                     }
+                }
+                long total = Math.Max(1, files.Sum(f => f.entry.Length)), done = 0;
+                int shown = -1;
+                var buffer = new byte[1 << 20];
+                foreach (var (entry, target) in files)
+                {
                     Directory.CreateDirectory(Path.GetDirectoryName(target));
-                    e.ExtractToFile(target, true);
+                    using (Stream from = entry.Open())
+                    using (var to = new FileStream(target, FileMode.Create, FileAccess.Write))
+                    {
+                        int n;
+                        while ((n = from.Read(buffer, 0, buffer.Length)) > 0)
+                        {
+                            to.Write(buffer, 0, n);
+                            done += n;
+                            int pct = (int)Math.Min(100, done * 100 / total);
+                            if (pct != shown)
+                            {
+                                shown = pct;
+                                progress(pct);
+                            }
+                        }
+                    }
+                    File.SetLastWriteTime(target, entry.LastWriteTime.DateTime);
                 }
             }
         }
@@ -492,6 +563,21 @@ namespace KillNetLauncher
                 }
             }
             File.WriteAllLines(file, lines);
+        }
+
+        // (Read by the mod as it starts: the launcher chose KILLNET or KILLCRAFT already, so it doesn't ask.)
+        public static void MarkLaunch(string game)
+        {
+            try
+            {
+                if (Directory.Exists(ModFolder(game)))
+                {
+                    File.WriteAllText(Path.Combine(ModFolder(game), "launcher-start.txt"), DateTime.UtcNow.Ticks.ToString());
+                }
+            }
+            catch (Exception)
+            {
+            }
         }
 
         public static void StartGame() => Process.Start(new ProcessStartInfo("steam://rungameid/" + SteamAppId) { UseShellExecute = true });

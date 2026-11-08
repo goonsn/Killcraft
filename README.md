@@ -57,7 +57,7 @@ You don't need SkyCraft or Skyrim: the Killcraft download already has SkyCraft's
 
 > **"Windows protected your PC"?** The launcher isn't code-signed (a signing certificate costs money), so Windows SmartScreen warns about any new exe like it. Click **More info**, then **Run anyway**. Its source is in this repo (`launcher/app`) if you want to check it or build it yourself.
 >
-> **Installed with r2modman, Gale or the Thunderstore app?** Start ULTRAKILL from there instead: the launcher is for installs in the game's own folder.
+> **Installed with r2modman, Gale or the Thunderstore app?** Start ULTRAKILL from there instead: the launcher is for installs in the game's own folder (it tells you if it finds one in a mod manager).
 
 **By hand:**
 

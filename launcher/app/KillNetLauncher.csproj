@@ -9,7 +9,7 @@
     <LangVersion>latest</LangVersion>
     <AssemblyName>KillNet</AssemblyName>
     <RootNamespace>KillNetLauncher</RootNamespace>
-    <Version>1.0.4</Version>
+    <Version>1.0.5</Version>
     <Product>KillNet</Product>
     <Company>goonsn</Company>
     <Copyright>KillNet</Copyright>

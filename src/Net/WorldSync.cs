@@ -14,11 +14,16 @@ namespace Killcraft
     //    walking through a door that is shut here;
     //  - skulls on altars (ItemPlaceZone): one put on an altar in one player's ULTRAKILL is put on the
     //    same altar in the others' (their copy of the same skull, or another of its colour), and taken
-    //    off it there as it's taken off, so the doors it opens open for everyone.
+    //    off it there as it's taken off, so the doors it opens open for everyone;
+    //  - hook points (the whiplash's): what grabbing one, being pulled to one or pulling a switch one does
+    //    in the level (its events: a door, a lift, a bridge) happens in the others' too, and a pulled
+    //    switch goes dark and comes back there as here;
+    //  - lifts (Elevator, Fraud's): sent to a floor by one player, they go there in the others' too.
     internal static class WorldSync
     {
         public const byte Broke = 21;
-        private const byte KindGlass = 0, KindBreakable = 1, KindPlaced = 2, KindTaken = 3, KindWave = 4;
+        private const byte KindGlass = 0, KindBreakable = 1, KindPlaced = 2, KindTaken = 3, KindWave = 4, KindHook = 5, KindLift = 6;
+        private const byte HookGrabbed = 0, HookLetGo = 1, HookReached = 2, HookSwitch = 3;
 
         private static bool applying;
         private static readonly Dictionary<uint, Component> things = new Dictionary<uint, Component>();
@@ -56,6 +61,132 @@ namespace Killcraft
             Hook(harmony, typeof(Punch), nameof(Punch.PlaceHeldObject), nameof(PlaceBefore), nameof(PlaceAfter));
             Hook(harmony, typeof(Punch), nameof(Punch.ForceHold), nameof(HoldBefore), nameof(HoldAfter));
             Hook(harmony, typeof(ActivateNextWave), "FixedUpdate", nameof(WaveBefore), nameof(WaveAfter));
+            After(harmony, typeof(HookPoint), nameof(HookPoint.Hooked), nameof(HookGrabbedAfter));
+            After(harmony, typeof(HookPoint), nameof(HookPoint.Unhooked), nameof(HookLetGoAfter));
+            After(harmony, typeof(HookPoint), nameof(HookPoint.Reached), nameof(HookReachedAfter), new[] { typeof(Vector3) });
+            After(harmony, typeof(HookPoint), nameof(HookPoint.SwitchPulled), nameof(HookSwitchAfter));
+            Hook(harmony, typeof(Elevator), nameof(Elevator.MoveToFloor), nameof(LiftBefore), nameof(LiftAfter));
+        }
+
+        private static void After(Harmony harmony, Type type, string method, string postfix, Type[] args = null)
+        {
+            try
+            {
+                harmony.Patch(AccessTools.Method(type, method, args), postfix: new HarmonyMethod(typeof(WorldSync), postfix));
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogError($"KillNet: couldn't hook ULTRAKILL's {type.Name}.{method} ({e.Message}); it won't happen for other players");
+            }
+        }
+
+        // ---- hook points ----
+        // (Only this player's own grabs: the others' are theirs to tell. A player's heal at a Providence
+        // hook point is theirs too: the others get its events, not the heal.)
+
+        private static void HookGrabbedAfter(HookPoint __instance) => TellHook(__instance, HookGrabbed);
+        private static void HookLetGoAfter(HookPoint __instance) => TellHook(__instance, HookLetGo);
+        private static void HookReachedAfter(HookPoint __instance) => TellHook(__instance, HookReached);
+        private static void HookSwitchAfter(HookPoint __instance) => TellHook(__instance, HookSwitch);
+
+        private static void TellHook(HookPoint hook, byte what)
+        {
+            if (applying || hook == null || !Room.Sharing || ReplayPlayer.Active)
+            {
+                return;
+            }
+            uint id = EnemySync.PathId(hook.transform);
+            KillNet.Send(Broke, KillNet.ToRoom, w =>
+            {
+                w.Write(KindHook);
+                w.Write(id);
+                w.Write(what);
+            });
+        }
+
+        private static void HandleHook(uint id, BinaryReader r)
+        {
+            byte what = r.ReadByte();
+            HookPoint hook = Lookup(KindHook, id) as HookPoint;
+            if (hook == null)
+            {
+                return;
+            }
+            applying = true;
+            try
+            {
+                switch (what)
+                {
+                    case HookGrabbed:
+                        hook.onHook?.Invoke();
+                        break;
+                    case HookLetGo:
+                        hook.onUnhook?.Invoke();
+                        break;
+                    case HookReached:
+                        hook.onReach?.Invoke();
+                        break;
+                    case HookSwitch:
+                        // (As pulled here: its events, dark, back on after its time.)
+                        if (hook.active)
+                        {
+                            hook.SwitchPulled();
+                            Plugin.Log.LogInfo($"KillNet: another player pulled {hook.name}: pulled here too");
+                        }
+                        break;
+                }
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogWarning($"KillNet: couldn't do {hook.name}'s hook point as another player did ({e.Message})");
+            }
+            finally
+            {
+                applying = false;
+            }
+        }
+
+        // ---- lifts ----
+
+        private static void LiftBefore(Elevator __instance, out int __state) => __state = __instance != null ? __instance.targetStop : -1;
+
+        private static void LiftAfter(Elevator __instance, int target, int __state)
+        {
+            if (applying || __instance == null || __state == target || __instance.targetStop != target || !Room.Sharing || ReplayPlayer.Active)
+            {
+                return;
+            }
+            uint id = EnemySync.PathId(__instance.transform);
+            KillNet.Send(Broke, KillNet.ToRoom, w =>
+            {
+                w.Write(KindLift);
+                w.Write(id);
+                w.Write(target);
+            });
+        }
+
+        private static void HandleLift(uint id, BinaryReader r)
+        {
+            int target = r.ReadInt32();
+            Elevator lift = Lookup(KindLift, id) as Elevator;
+            if (lift == null || lift.stops == null || target < 0 || target >= lift.stops.Length || lift.targetStop == target)
+            {
+                return;
+            }
+            applying = true;
+            try
+            {
+                lift.MoveToFloor(target);
+                Plugin.Log.LogInfo($"KillNet: another player sent {lift.name} to floor {target}: here too");
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogWarning($"KillNet: couldn't move {lift.name} as another player did ({e.Message})");
+            }
+            finally
+            {
+                applying = false;
+            }
         }
 
         // ---- arenas' waves ----
@@ -379,6 +510,16 @@ namespace Killcraft
                 HandleItem(kind, id, r);
                 return;
             }
+            if (kind == KindHook)
+            {
+                HandleHook(id, r);
+                return;
+            }
+            if (kind == KindLift)
+            {
+                HandleLift(id, r);
+                return;
+            }
             Component thing = Lookup(kind, id);
             if (thing == null)
             {
@@ -429,6 +570,20 @@ namespace Killcraft
                 if (b != null && b.gameObject.scene.IsValid() && b.gameObject.scene.isLoaded)
                 {
                     things[EnemySync.PathId(b.transform)] = b;
+                }
+            }
+            foreach (HookPoint h in Resources.FindObjectsOfTypeAll<HookPoint>())
+            {
+                if (h != null && h.gameObject.scene.IsValid() && h.gameObject.scene.isLoaded)
+                {
+                    things[EnemySync.PathId(h.transform)] = h;
+                }
+            }
+            foreach (Elevator e in Resources.FindObjectsOfTypeAll<Elevator>())
+            {
+                if (e != null && e.gameObject.scene.IsValid() && e.gameObject.scene.isLoaded)
+                {
+                    things[EnemySync.PathId(e.transform)] = e;
                 }
             }
             return things.TryGetValue(id, out c) ? c : null;

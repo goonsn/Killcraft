@@ -554,7 +554,10 @@ namespace Killcraft
                 DiscordRpc.Frame(inGame && !loading);
                 Profiles.Frame(nm, inGame && !loading, paused);
                 PartyChat.Frame();
+                ModeChoice.Frame(mainMenu, loading);
                 PartyMenu.Frame(inGame, paused, mainMenu, loading);
+                PartyWake.Frame();
+                LoadingScreen.Frame();
                 OptionsTab.Frame();
                 Replays.Frame(mainMenu && !loading);
                 KillcraftPanel.Frame(inGame, paused, mainMenu, loading);
@@ -1136,7 +1139,7 @@ namespace Killcraft
             {
                 return "Killcraft: couldn't create the shared memory (see BepInEx/LogOutput.log)";
             }
-            if (!mcWasAlive && !Plugin.WithMinecraft && Launcher.State == Launcher.Status.Off)
+            if (!mcWasAlive && (ModeChoice.Pending || (!Plugin.WithMinecraft && Launcher.State == Launcher.Status.Off)))
             {
                 return null;  // (Minecraft off, as the launcher's MINECRAFT: OFF sets it: plain multiplayer, nothing to wait for.)
             }
@@ -1176,6 +1179,7 @@ namespace Killcraft
             // (The chat in a level: ChatBox.)
             DamageNumbers.Gui();
             Voice.Gui();
+            RemotePlayers.Gui();
 
             string text = StatusText();
             if (text != null)
@@ -1238,6 +1242,9 @@ namespace Killcraft
                         break;
                     case Party.GoingMessage:
                         Party.HandleGoing(from, r);
+                        break;
+                    case PartyWake.WakeMessage:
+                        PartyWake.Handle(from, r);
                         break;
                     case Party.WorldMessage:
                         Party.HandleWorld(r);

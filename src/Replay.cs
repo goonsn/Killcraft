@@ -21,6 +21,21 @@ namespace Killcraft
     internal static class Replay
     {
         // Not messages: things in the run itself, kept among them.
+        // Which arm is out (0 the Feedbacker, 1 the Knuckleblaster), as ULTRAKILL keeps it.
+        private static readonly HarmonyLib.AccessTools.FieldRef<FistControl, int> armNum = HarmonyLib.AccessTools.FieldRefAccess<FistControl, int>("currentVarNum");
+
+        public static int ArmOf(FistControl fc)
+        {
+            try
+            {
+                return Mathf.Clamp(armNum(fc), 0, 254);
+            }
+            catch
+            {
+                return 255;
+            }
+        }
+
         public const byte AuthorityEvent = 250, RestartEvent = 251, CheckpointEvent = 252, MarkEvent = 253, HitEvent = 249, InputEvent = 248;
 
         // A hit on an enemy (as EnemySync's Damage message has it): played back as dealt.
@@ -152,7 +167,7 @@ namespace Killcraft
             public float Clock, HpAt, PictureAt = 6f;
             public bool Pictured, SavedOnce, Done;
             public float FinishAt = -1f;
-            public int InputBits = -1;
+            public int InputBits = -1, InputArm = -1;
             public int LastAuthority = int.MinValue, Checkpoints, LowestHp = 100;
             public readonly List<int> Ids = new List<int>();
             public readonly List<int> Hp = new List<int>();
@@ -301,17 +316,21 @@ namespace Killcraft
                     return;
                 }
                 run.Clock += Mathf.Min(Time.unscaledDeltaTime, Time.maximumDeltaTime);
-                // The fire buttons (each change): played back to the guns themselves.
+                // The fire buttons, the punch and the whiplash, and which arm is out (each change): played back
+                // to the guns and the arms themselves.
                 try
                 {
                     PlayerInput input = MonoSingleton<InputManager>.Instance != null ? MonoSingleton<InputManager>.Instance.InputSource : null;
                     if (input != null)
                     {
-                        int bits = (input.Fire1.IsPressed ? 1 : 0) | (input.Fire2.IsPressed ? 2 : 0);
-                        if (bits != run.InputBits)
+                        int bits = (input.Fire1.IsPressed ? 1 : 0) | (input.Fire2.IsPressed ? 2 : 0) | (input.Punch.IsPressed ? 4 : 0) | (input.Hook.IsPressed ? 8 : 0);
+                        FistControl fc = MonoSingleton<FistControl>.Instance;
+                        int arm = fc != null ? ArmOf(fc) : 255;
+                        if (bits != run.InputBits || arm != run.InputArm)
                         {
                             run.InputBits = bits;
-                            Write(-1, InputEvent, new[] { (byte)bits }, 0, 1);
+                            run.InputArm = arm;
+                            Write(-1, InputEvent, new[] { (byte)bits, (byte)arm }, 0, 2);
                         }
                     }
                 }

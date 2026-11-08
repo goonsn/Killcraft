@@ -657,15 +657,20 @@ namespace Killcraft
         public static Sprite RoundedLine => roundedLine != null ? roundedLine : roundedLine = Shape(40, 9f, 2.2f, true, false);
         public static Sprite RoundedFill => roundedFill != null ? roundedFill : roundedFill = Shape(40, 9f, 0f, true, true);
 
-        // The "..." button by a player (UltraLink's): a rounded box, three square dots across its middle.
+        // The "..." button's box (UltraLink's, ULTRAKILL's look): corners cut at 45 degrees, a thin line.
+        private static Sprite moreLine, moreFill;
+        public static Sprite MoreLine => moreLine != null ? moreLine : moreLine = Shape(40, 8f, 2.2f, false, false);
+        public static Sprite MoreFill => moreFill != null ? moreFill : moreFill = Shape(40, 8f, 0f, false, true);
+
+        // The "..." button by a player (UltraLink's): that box, three round dots across its middle.
         public static UiButton MoreButton(Transform parent, Action click, float x, float y, float w, float h)
         {
             UiButton b = Button(parent, "", 10f, click, x, y, w, h, TextAlignmentOptions.Center, true, 2.2f);
-            b.Line = RoundedLine;
-            b.Filled = RoundedFill;
-            b.Back.sprite = RoundedLine;
+            b.Line = MoreLine;
+            b.Filled = MoreFill;
+            b.Back.sprite = MoreLine;
             b.Back.pixelsPerUnitMultiplier = 1f;
-            float dot = Mathf.Max(3f, Mathf.Round(h * 0.12f)), gap = Mathf.Max(3f, Mathf.Round(dot * 1.1f));
+            float dot = Mathf.Max(4f, Mathf.Round(h * 0.15f)), gap = Mathf.Max(3f, Mathf.Round(dot * 0.8f));
             float total = 3f * dot + 2f * gap;
             b.Dots = new Image[3];
             for (int i = 0; i < 3; i++)
@@ -674,7 +679,7 @@ namespace Killcraft
                 d.anchorMin = d.anchorMax = new Vector2(0.5f, 0.5f);
                 d.pivot = new Vector2(0.5f, 0.5f);
                 d.anchoredPosition = new Vector2(-total / 2f + dot / 2f + i * (dot + gap), 0f);
-                b.Dots[i] = Picture(d, null, White);
+                b.Dots[i] = Picture(d, CircleFill, White);
             }
             b.Refresh();
             return b;
@@ -1021,9 +1026,13 @@ namespace Killcraft
             }
         }
 
+        // (The mouse onto it: for screens that show the one under the mouse their own way.)
+        public Action Hovered;
+
         public void OnPointerEnter(PointerEventData e)
         {
             hover = true;
+            Hovered?.Invoke();
         }
 
         public void OnPointerExit(PointerEventData e)

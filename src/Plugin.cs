@@ -7,7 +7,7 @@ using UnityEngine.SceneManagement;
 
 namespace Killcraft
 {
-    [BepInPlugin("dev.killcraft", "Killcraft", "2.0.0")]
+    [BepInPlugin("dev.killcraft", "Killcraft", "2.0.1")]
     public sealed class Plugin : BaseUnityPlugin
     {
         internal static ManualLogSource Log;
@@ -36,6 +36,8 @@ namespace Killcraft
         internal static ConfigEntry<string> LauncherPath;
         internal static ConfigEntry<string> LauncherArgs;
         internal static ConfigEntry<bool> Diagnostics;
+        internal static ConfigEntry<int> SimLatencyMs;
+        internal static ConfigEntry<float> SimLossPercent;
         internal static ConfigEntry<float> BlockBrightness;
         internal static ConfigEntry<int> TntFuseTicks;
         internal static ConfigEntry<bool> DigIntoLevels;
@@ -62,7 +64,8 @@ namespace Killcraft
         internal static ConfigEntry<int> ListWorld;
         internal static ConfigEntry<string> PartyTitle, LastParty;
         internal static ConfigEntry<int> PartyMax;
-        internal static ConfigEntry<bool> PartyCheats;
+        internal static ConfigEntry<bool> PartyCheats, AutoRejoin, PartyOpen;
+        internal static ConfigEntry<bool> AskMode;
         internal static ConfigEntry<int> VoiceMode;
         internal static ConfigEntry<string> VoiceKey;
         internal static ConfigEntry<float> VoiceVolume;
@@ -128,6 +131,9 @@ namespace Killcraft
                 "Bosses' hits go through Minecraft armour (Protection enchantments still count). A raised shield still blocks them.");
             StartMinecraft = cfg.Bind("Minecraft", "StartWithUltrakill", true,
                 "Start Minecraft (hidden) when ULTRAKILL starts. Off: start the SkyCraft Prism instance yourself.");
+            AskMode = cfg.Bind("Minecraft", "AskAtStart", true,
+                "Ask KILLNET (multiplayer only) or KILLCRAFT (with Minecraft) when ULTRAKILL starts (not when the launcher starts it: it asks there). " +
+                "Off: StartWithUltrakill decides.");
             LauncherPath = cfg.Bind("Minecraft", "Launcher", "",
                 "Empty: SkyCraft's bundled portable Prism Launcher (SkyCraft-Minecraft.zip next to this plugin). Or the full path of your own launcher.");
             LauncherArgs = cfg.Bind("Minecraft", "Arguments",
@@ -176,7 +182,12 @@ namespace Killcraft
             PartyTitle = cfg.Bind("Multiplayer", "PartyName", "", "The name your party shows in the server list (HOST PARTY on the party screen). Empty: <your Steam name>'s Lobby.");
             PartyMax = cfg.Bind("Multiplayer", "PartyMaxPlayers", 10, "How many can be in a party you make, 2 to 10.");
             PartyCheats = cfg.Bind("Multiplayer", "PartyCheats", false, "In a party you make: whether ULTRAKILL's cheats can be turned on (by anyone in it). The sandbox always has them.");
-            LastParty = cfg.Bind("Multiplayer", "LastParty", "", "The last party you joined (its Steam lobby and name), for REJOIN on the party screen.");
+            LastParty = cfg.Bind("Multiplayer", "LastParty", "", "The last party you were in (its Steam lobby and name), for REJOIN on the party screen.");
+            AutoRejoin = cfg.Bind("Multiplayer", "AutoRejoin", true,
+                "Lost the connection to your party, or ULTRAKILL closed without leaving it (a crash): join it again by itself.");
+            PartyOpen = cfg.Bind("Multiplayer", "InPartyNow", false,
+                "Set by KillNet while you're in a party (cleared when you leave it or quit): still set at the next start means ULTRAKILL crashed in one.");
+            UnityEngine.Application.quitting += () => PartyOpen.Value = false;
             VoiceMode = cfg.Bind("Voice", "Mode", 1,
                 "Voice chat with the others in your world (through Steam: its microphone and levels): 0 off, 1 push to talk (VoiceKey), 2 open microphone.");
             VoiceKey = cfg.Bind("Voice", "PushToTalkKey", "V",
@@ -213,7 +224,9 @@ namespace Killcraft
                 "Key that turns Minecraft off (V1 is plain ULTRAKILL again; Minecraft's player waits) and back on. A Unity Input System key name, e.g. F9, F10, Backquote.");
             ThirdPersonKey = cfg.Bind("Controls", "ThirdPerson", "F5",
                 "Key that switches V1 between first and third person in ULTRAKILL mode (not while spectating). A Unity Input System key name.");
-            Diagnostics = cfg.Bind("Debug", "Diagnostics", false, "Extra logging (collision sources, timings).");
+            Diagnostics = cfg.Bind("Debug", "Diagnostics", false, "Extra logging (collision sources, timings). With it on, F8 in a level shows the other players' network and animation state (their last reported position in red, where they're drawn in green).");
+            SimLatencyMs = cfg.Bind("Debug", "SimLatencyMs", 0, "Pretend lag, in milliseconds, on what the other players say of their V1 (to test with two Killcrafts on one PC). 0 for none.");
+            SimLossPercent = cfg.Bind("Debug", "SimLossPercent", 0f, "Pretend packet loss, in percent, on what the other players say of their V1. 0 for none.");
             ShaderPack.Bind(cfg);
 
             var harmony = new Harmony("dev.killcraft");
@@ -235,10 +248,13 @@ namespace Killcraft
                 return;
             }
             KillNet.Start();
-            if (WithMinecraft)
+            // (Asked in the main menu first, ModeChoice: Minecraft starts once it's answered.)
+            if (!ModeChoice.Decide() && WithMinecraft)
             {
                 Launcher.StartMinecraft();
             }
+            ModeChoice.Hook();
+            LoadingScreen.Hook();
         }
 
         private static Host host;

@@ -703,8 +703,18 @@ namespace Killcraft
             }
         }
 
+        // (Its "..." again: closed.)
+        private static int popupFor = int.MinValue;
+
         private static void More(int id, RectTransform row)
         {
+            if (popupFor == id && popup.gameObject.activeSelf)
+            {
+                popup.gameObject.SetActive(false);
+                popupFor = int.MinValue;
+                return;
+            }
+            popupFor = id;
             Ui.Clear(popup);
             bool me = id == Room.MyId;
             Party.Member member = null;
@@ -724,8 +734,12 @@ namespace Killcraft
             {
                 items.Add(("KICK", () => Party.KickOut(member)));
             }
+            if (!me)
+            {
+                Profiles.Info info = Profiles.Of(id);
+                items.Add((info.Muted ? "UNMUTE" : "MUTE", () => info.Muted = !info.Muted));
+            }
             items.Add(("STEAM PROFILE", () => Profiles.OpenSteamProfile(id)));
-            items.Add(("CLOSE", () => { }));
             const float pw = 196f, ih = 32f, gap = 6f;
             float ph = 16f + items.Count * (ih + gap) - gap;
             popup.sizeDelta = new Vector2(pw, ph);
@@ -739,6 +753,7 @@ namespace Killcraft
                 {
                     act();
                     popup.gameObject.SetActive(false);
+                    popupFor = int.MinValue;
                 }, 8f, 8f + n * (ih + gap), pw - 16f, ih, TextAlignmentOptions.Center, true, 2.2f);
                 if (items[n].Label == "KICK")
                 {

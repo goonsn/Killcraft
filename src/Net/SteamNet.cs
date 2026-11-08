@@ -42,6 +42,10 @@ namespace Killcraft
         private static ulong routedFor;
         private static long sinceCounter;
 
+        // (When the party's owner was last heard from, by a player who isn't it: Rejoin watches it.)
+        public static float OwnerHeardAt { get; private set; } = -100f;
+        public static event Action<ulong> ConnectionFailed;
+
         // (Trying multiplayer on one PC, second-player.bat: localhost instead of Steam, LocalLink.)
         private static bool Local => LocalLink.Wanted;
 
@@ -188,7 +192,10 @@ namespace Killcraft
                 }
             };
             SteamNetworking.OnP2PConnectionFailed += (id, error) =>
+            {
                 Plugin.Log.LogWarning($"KillNet: Steam couldn't reach {new Friend(id).Name} ({error})");
+                ConnectionFailed?.Invoke(id.Value);
+            };
             SteamMatchmaking.OnLobbyMemberJoined += (l, f) => roomsChanged = true;
             SteamMatchmaking.OnLobbyMemberLeave += (l, f) => Gone(f.Id.Value);
             SteamMatchmaking.OnLobbyMemberDisconnected += (l, f) => Gone(f.Id.Value);
@@ -255,6 +262,7 @@ namespace Killcraft
             lobbyReadAt = -100f;
             roomsChanged = true;
             routedFor = 0;
+            OwnerHeardAt = Time.unscaledTime;
         }
 
         // ---- sending ----
@@ -330,6 +338,7 @@ namespace Killcraft
                 else if (OwnerId == from && data.Length >= 6)
                 {
                     // (From the owner: passed on to this player.)
+                    OwnerHeardAt = Time.unscaledTime;
                     Arrived(data);
                 }
             }

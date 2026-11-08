@@ -29,10 +29,8 @@ namespace Killcraft
         private Transform leftFoot, rightFoot;
         private float lean, roll, twist, swing, legSpan = 1f, lastYaw, turn, kickPitch, kickYaw, breath;
         private bool haveYaw;
-        // (The legs' speed: another player's.)
-        private Transform planted;
-        private Vector3 plantedAt;
-        private float legSpeed = 1f;
+        // (The legs' speed, and the free arm raised to the whiplash: another player's.)
+        private float legSpeed = 1f, hookArm;
 
         // This player's own V1 in F5 (after its PlayerAnimations).
         public static void Apply(PlayerAnimations pa)
@@ -44,8 +42,20 @@ namespace Killcraft
             }
             bool ground = nm.gc != null && nm.gc.onGround;
             bool still = nm.sliding || (nm.boost && !nm.sliding);
+            // (As the others see it: the slam's tuck, the arm raised to the whiplash.)
+            bool slam = nm.gc != null && nm.gc.heavyFall && !ground;
+            bool hooked = false;
+            try
+            {
+                HookArm arm = MonoSingleton<HookArm>.Instance;
+                hooked = arm != null && arm.state != HookState.Ready;
+            }
+            catch
+            {
+            }
+            Vector3 look = nm.cc != null ? nm.cc.transform.forward : nm.transform.forward;
             mine.Run(pa.transform, nm.transform, nm.rb.velocity, ground, still, ChestOf(pa), HeadOf(pa), RightArmOf(pa), LeftArmOf(pa),
-                LeftArmWeightOf(pa) <= 0.01f, null);
+                LeftArmWeightOf(pa) <= 0.01f, null, -1f, slam, hooked, look);
         }
 
         // A shot's kick back, a punch's turn (degrees).
@@ -57,8 +67,11 @@ namespace Killcraft
 
         // body: what the animations pose (its bones under it); basis: turned the way the player looks
         // (flat); velocity: theirs; anim: to set the legs' speed by (another player's), or null.
+        // Another player's too: dt (their time, unscaled), slam (falling in a ground slam), hooked (the
+        // whiplash out), look (where they look), legScale (how much bigger than V1 the body is drawn).
         public void Run(Transform body, Transform basis, Vector3 velocity, bool ground, bool still, Transform chest, Transform head,
-            Transform rightArm, Transform leftArm, bool leftFree, Animator anim)
+            Transform rightArm, Transform leftArm, bool leftFree, Animator anim,
+            float dt = -1f, bool slam = false, bool hooked = false, Vector3 look = default, float legScale = 1f)
         {
             if (body == null || chest == null || head == null || rightArm == null)
             {
@@ -68,7 +81,7 @@ namespace Killcraft
             {
                 Find(body);
             }
-            float dt = Mathf.Max(Time.deltaTime, 1e-4f);
+            dt = Mathf.Max(dt > 0f ? dt : Time.deltaTime, 1e-4f);
             Vector3 local = basis.InverseTransformDirection(velocity);
             float speed = new Vector2(local.x, local.z).magnitude;
             float run = ground && !still ? Mathf.Clamp01(speed / 16f) : 0f;
@@ -90,8 +103,10 @@ namespace Killcraft
             }
 
             float k = 1f - Mathf.Exp(-dt * 12f);
-            float leanTo = ground ? Mathf.Clamp(local.z / 16f, -1f, 1f) * 15f * (still ? 0f : 1f) : Mathf.Clamp(-local.y * 0.5f, -14f, 12f);
-            float rollTo = Mathf.Clamp(-local.x / 16f, -1f, 1f) * (ground ? 10f : 6f) - turn * 10f * Mathf.Max(run, 0.3f);
+            // (Slamming down: tucked forward, straight.)
+            float leanTo = slam ? RemoteTuning.SlamLean
+                : ground ? Mathf.Clamp(local.z / 16f, -1f, 1f) * 15f * (still ? 0f : 1f) : Mathf.Clamp(-local.y * 0.5f, -14f, 12f);
+            float rollTo = slam ? 0f : Mathf.Clamp(-local.x / 16f, -1f, 1f) * (ground ? 10f : 6f) - turn * 10f * Mathf.Max(run, 0.3f);
             lean = Mathf.Lerp(lean, leanTo, k);
             roll = Mathf.Lerp(roll, rollTo, k);
             twist = Mathf.Lerp(twist, -stride * 14f * run, 1f - Mathf.Exp(-dt * 20f));
@@ -116,41 +131,39 @@ namespace Killcraft
             {
                 aimer.rotation = aimerAim;
             }
-            // The free arm (not while it punches or throws).
+            // The free arm (not while it punches or throws); raised to the whiplash while it's out.
             if (leftArm != null && leftFree)
             {
                 float air = ground ? 0f : -25f;
                 leftArm.rotation = Quaternion.AngleAxis(swing + air + breathe * 2f, basis.right) * leftArm.rotation;
+                hookArm = Mathf.Lerp(hookArm, hooked ? 1f : 0f, 1f - Mathf.Exp(-dt * RemoteTuning.HookArmEase));
+                if (hookArm > 0.01f && look.sqrMagnitude > 0.01f)
+                {
+                    // (Along the bone as the gun arm is aimed: PlayerAnimations.AimRightArm's turns.)
+                    Quaternion reach = Quaternion.LookRotation(look, Vector3.up) * Quaternion.AngleAxis(90f, Vector3.right) * Quaternion.AngleAxis(180f, Vector3.up);
+                    leftArm.rotation = Quaternion.Slerp(leftArm.rotation, reach, hookArm);
+                }
+            }
+            else
+            {
+                hookArm = 0f;
             }
 
             if (anim != null)
             {
-                Legs(anim, velocity, run, dt);
+                Legs(anim, speed, run, dt, legScale);
             }
         }
 
-        // The foot on the ground (the lower) should stay where it is while the body goes on: moving
-        // with the body, the legs are behind (faster); going back, ahead (slower).
-        private void Legs(Animator anim, Vector3 velocity, float run, float dt)
+        // The legs' cycle at the body's ground speed, so the foot on the ground stays put: the run
+        // clip's full stride is V1 at RunClipSpeed (faster above it), and a body drawn legScale times
+        // bigger strides legScale times further (slower). (The whole animator's speed: there's no
+        // other; eased, and only while running.)
+        private void Legs(Animator anim, float speed, float run, float dt, float legScale)
         {
-            if (run < 0.25f || leftFoot == null || rightFoot == null)
-            {
-                planted = null;
-                legSpeed = Mathf.MoveTowards(legSpeed, 1f, dt * 2f);
-                anim.speed = legSpeed;
-                return;
-            }
-            Transform low = leftFoot.position.y < rightFoot.position.y ? leftFoot : rightFoot;
-            Vector3 flat = new Vector3(velocity.x, 0f, velocity.z);
-            float v = flat.magnitude;
-            if (low == planted && v > 1f)
-            {
-                Vector3 moved = low.position - plantedAt;
-                float slip = Vector3.Dot(new Vector3(moved.x, 0f, moved.z) / dt, flat / v) / v;
-                legSpeed = Mathf.Clamp(legSpeed * Mathf.Exp(Mathf.Clamp(slip, -1f, 1f) * dt * 2.5f), 0.5f, 2.2f);
-            }
-            planted = low;
-            plantedAt = low.position;
+            float want = run < 0.2f ? 1f
+                : Mathf.Clamp(Mathf.Max(1f, speed / RemoteTuning.RunClipSpeed) / Mathf.Max(legScale, 0.1f), RemoteTuning.LegSpeedMin, RemoteTuning.LegSpeedMax);
+            legSpeed = Mathf.Lerp(legSpeed, want, 1f - Mathf.Exp(-dt * RemoteTuning.LegSpeedEase));
             anim.speed = legSpeed;
         }
 

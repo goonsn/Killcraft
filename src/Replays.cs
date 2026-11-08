@@ -24,6 +24,8 @@ namespace Killcraft
         // (Names with a thin dark edge, as UltraLink's: given it once the font is set.)
         private static readonly List<TextMeshProUGUI> outlined = new List<TextMeshProUGUI>();
         private static float listedAt = -100f;
+        internal static string armedFile = "";
+        internal static float armedAt = -100f;
         private static bool revealNext;
         private static List<Replay.Info> infos = new List<Replay.Info>();
         private static readonly Dictionary<string, Texture2D> pictures = new Dictionary<string, Texture2D>();
@@ -291,19 +293,32 @@ namespace Killcraft
                 Ranked(row, 952f, 48f, i.KillsRank, "KILLS", i.Kills.ToString());
                 Ranked(row, 952f, 74f, i.StyleRank, "STYLE", i.Style.ToString("N0"));
             }
-            UiButton play = Ui.Button(row, "PLAY", 18f, () => ReplayPlayer.Play(i, true), 1082f, 26f, 84f, 36f, TextAlignmentOptions.Center, true, 2.5f);
+            UiButton play = Ui.Button(row, "PLAY", 18f, () => ReplayPlayer.Play(i, true), 1060f, 26f, 88f, 36f, TextAlignmentOptions.Center, true, 2.5f);
             play.On = true;
             play.Accent = KillcraftPanel.KillRed;
             play.TextOn = Color.white;
             play.Refresh();
-            UiButton x = Ui.Button(row, "X", 18f, () =>
+            // X: deletes it, clicked twice (the first turns it red: sure?).
+            UiButton x = null;
+            x = Ui.Button(row, "X", 18f, () =>
             {
-                Replay.Delete(i);
-                listedAt = -100f;
-            }, 1168f, 28f, 26f, 32f, TextAlignmentOptions.Center, true, 0.01f);
-            x.Bare = true;
-            x.Hold = 0.8f;
+                if (armedFile == i.File && Time.unscaledTime - armedAt < 3f)
+                {
+                    armedFile = "";
+                    Replay.Delete(i);
+                    listedAt = -100f;
+                    return;
+                }
+                armedFile = i.File;
+                armedAt = Time.unscaledTime;
+                x.On = true;
+                x.Refresh();
+            }, 1154f, 26f, 40f, 36f, TextAlignmentOptions.Center, true, 2.5f);
+            x.Accent = KillcraftPanel.KillRed;
+            x.TextOn = Color.white;
+            x.On = armedFile == i.File && Time.unscaledTime - armedAt < 3f;
             x.Refresh();
+            row.gameObject.AddComponent<UiDisarm>().Watch(x, i.File);
             UiButton cf = Ui.Button(row, open ? "CLOSE  <size=9>▲</size>" : "CASE FILE  <size=9>▼</size>", 12f, () =>
             {
                 expanded = expanded == i.File ? "" : i.File;
@@ -614,6 +629,28 @@ namespace Killcraft
             if (transform.parent is RectTransform parent)
             {
                 LayoutRebuilder.MarkLayoutForRebuild(parent);
+            }
+        }
+    }
+
+    // (A replay's X, red after its first click: back to white if the second doesn't come in 3 s.)
+    internal sealed class UiDisarm : MonoBehaviour
+    {
+        private UiButton button;
+        private string file;
+
+        public void Watch(UiButton b, string f)
+        {
+            button = b;
+            file = f;
+        }
+
+        private void Update()
+        {
+            if (button != null && button.On && (Replays.armedFile != file || Time.unscaledTime - Replays.armedAt >= 3f))
+            {
+                button.On = false;
+                button.Refresh();
             }
         }
     }

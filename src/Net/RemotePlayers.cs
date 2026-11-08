@@ -19,7 +19,7 @@ namespace Killcraft
     internal static class RemotePlayers
     {
         private const float SendEvery = 0.05f;
-        private const byte FlagUltrakill = 1, FlagGround = 2, FlagSliding = 4, FlagDead = 8, FlagDash = 16;
+        private const byte FlagUltrakill = 1, FlagGround = 2, FlagSliding = 4, FlagDead = 8, FlagDash = 16, FlagSlam = 32, FlagHook = 64;
         public const byte WeaponRevolver = 0, WeaponShotgun = 1, WeaponNailgun = 2, WeaponRailcannon = 3, WeaponRocket = 4, WeaponNone = 255;
 
         private sealed class Remote
@@ -27,11 +27,21 @@ namespace Killcraft
             public Vector3 Feet, Velocity, Look = Vector3.forward;
             public float Yaw, At;
             // What they said lately, by their own clock (shown a moment behind, between two of them:
-            // smooth however unevenly they come through the Minecraft server), and that clock's
-            // offset from this one's, and how unevenly they come.
+            // smooth however unevenly they come), and that clock's offset from this one's, and how
+            // unevenly they come. Everything of theirs is read off this one timeline at one moment
+            // (PlayT): where they are, how fast, which way, what they're doing, their gun; and their
+            // moves (Moves) wait for it, so a jump or a landing plays as the body gets there.
             public readonly List<Snap> Snaps = new List<Snap>();
-            public bool Timed;
-            public float Offset = float.NaN, Jitter = 0.03f;
+            public readonly List<Move> Moves = new List<Move>();
+            public bool Timed, Extrapolated;
+            public float Offset = float.NaN, Jitter = 0.03f, PlayT, Delay;
+            // When their last jump and landing played, by their clock (an event, or one made up from
+            // their state when its event was lost: not both).
+            public float JumpedAt = -100f, LandedAt = -100f, JumpMadeUpAt = -100f, LandMadeUpAt = -100f;
+            // Debug markers: where they last said they were (red), where they're drawn (green).
+            public GameObject RawMarker, ShownMarker;
+            // Each frame's debug readout.
+            public string Debug = "";
             public int Variant = -1;
             public byte Flags, Weapon = WeaponNone;
             public string WeaponName = "";
@@ -70,10 +80,41 @@ namespace Killcraft
             public Light ItemLight;
         }
 
+        // What they said at one moment of their clock.
         public struct Snap
         {
             public float T;
-            public Vector3 Feet, Velocity;
+            public Vector3 Feet, Velocity, Look;
+            public float Yaw;
+            public byte Flags, Weapon;
+            public bool Alt;
+        }
+
+        // A move of theirs (V1Body.Moves), waiting for its moment of their timeline.
+        public struct Move
+        {
+            public float T, Value;
+            public byte Kind;
+        }
+
+        // Their state as read off the timeline at the moment shown.
+        private struct Sampled
+        {
+            public Vector3 Feet, Velocity, Look;
+            public float Yaw;
+            public byte Flags, Weapon;
+            public bool Alt, Extrapolated;
+
+            public void Take(in Snap s)
+            {
+                Feet = s.Feet;
+                Velocity = s.Velocity;
+                Look = s.Look;
+                Yaw = s.Yaw;
+                Flags = s.Flags;
+                Weapon = s.Weapon;
+                Alt = s.Alt;
+            }
         }
 
         private static readonly List<EnemyTarget> targets = new List<EnemyTarget>();
@@ -110,6 +151,8 @@ namespace Killcraft
                 Send(nm, cc, dt, ultrakillMode);
                 SendItem();
             }
+            NetSim.Frame();
+            DebugKeys();
 
             // Gone (left the level or the world: quiet for a while). (Lists kept, not made each frame:
             // what's made each frame is the garbage collector's work, a stutter now and then.)
@@ -229,8 +272,18 @@ namespace Killcraft
             catch
             {
             }
+            bool hook = false;
+            try
+            {
+                HookArm arm = MonoSingleton<HookArm>.Instance;
+                hook = arm != null && arm.state != HookState.Ready;
+            }
+            catch
+            {
+            }
             byte flags = (byte)((ultrakillMode ? FlagUltrakill : 0) | (ground ? FlagGround : 0) | (nm.sliding ? FlagSliding : 0)
-                | (nm.dead ? FlagDead : 0) | (nm.boost && !nm.sliding ? FlagDash : 0) | (nm.gc != null && nm.gc.heavyFall ? 32 : 0));
+                | (nm.dead ? FlagDead : 0) | (nm.boost && !nm.sliding ? FlagDash : 0) | (nm.gc != null && nm.gc.heavyFall ? FlagSlam : 0)
+                | (hook ? FlagHook : 0));
             float yaw = cc != null ? cc.rotationY : nm.transform.eulerAngles.y;
             Vector3 look = cc != null ? cc.transform.forward : nm.transform.forward;
             GameObject weapon = CurrentWeapon(out byte kind, out bool alt);
@@ -287,6 +340,28 @@ namespace Killcraft
 
         public static void Handle(int from, BinaryReader r)
         {
+            if (NetSim.Hold(from, KillNet.PlayerState, r))
+            {
+                return;
+            }
+            HandleNow(from, r);
+        }
+
+        // (From NetSim, when its pretend lag is up.)
+        internal static void Deliver(int from, byte type, BinaryReader r)
+        {
+            if (type == KillNet.PlayerState)
+            {
+                HandleNow(from, r);
+            }
+            else if (type == V1Body.Moves)
+            {
+                HandleMoveNow(from, r);
+            }
+        }
+
+        private static void HandleNow(int from, BinaryReader r)
+        {
             if (!remotes.TryGetValue(from, out Remote remote))
             {
                 remotes[from] = remote = new Remote();
@@ -333,7 +408,11 @@ namespace Killcraft
                 remote.Offset += (sample - remote.Offset) * 0.01f;
             }
             remote.Jitter = Mathf.Lerp(remote.Jitter, Mathf.Clamp(sample - remote.Offset, 0f, 0.5f), 0.08f);
-            var snap = new Snap { T = at, Feet = remote.Feet, Velocity = remote.Velocity };
+            var snap = new Snap
+            {
+                T = at, Feet = remote.Feet, Velocity = remote.Velocity, Look = remote.Look, Yaw = remote.Yaw,
+                Flags = remote.Flags, Weapon = remote.Weapon, Alt = remote.Alt,
+            };
             List<Snap> list = remote.Snaps;
             if (list.Count > 0 && at <= list[list.Count - 1].T)
             {
@@ -346,20 +425,33 @@ namespace Killcraft
             }
         }
 
-        // Where they are to be shown: a moment ago by their clock, between what they said then (along
-        // the curve their speeds make); past the newest, carried on by its speed a little.
-        private static Vector3 Interpolated(Remote r)
+        // The moment of their timeline shown now: behind the newest they said by the delay (RemoteTuning).
+        private static float PlayTime(Remote r)
         {
+            r.Delay = Mathf.Clamp(RemoteTuning.DelayBase + RemoteTuning.DelayPerJitter * r.Jitter, RemoteTuning.DelayMin, RemoteTuning.DelayMax);
+            return Time.unscaledTime - r.Offset - r.Delay;
+        }
+
+        // Their state at the moment shown, all of it from the one time: between the two they said either
+        // side of it (the place along the curve their speeds make; speed, facing and look between the
+        // two; what they were doing and holding as of the earlier one, so a jump or a slide begins as
+        // the body gets to where it began); past the newest, carried on by its speed a little, then held.
+        private static Sampled Sample(Remote r)
+        {
+            var s = new Sampled { Feet = r.Feet, Velocity = r.Velocity, Look = r.Look, Yaw = r.Yaw, Flags = r.Flags, Weapon = r.Weapon, Alt = r.Alt };
             List<Snap> list = r.Snaps;
             if (!r.Timed || list.Count == 0)
             {
-                return r.Feet + r.Velocity * Mathf.Min(Time.unscaledTime - r.At, 0.1f);
+                // (An older Killcraft, without its clock: the newest, carried on a little.)
+                s.Feet = r.Feet + r.Velocity * Mathf.Min(Time.unscaledTime - r.At, 0.1f);
+                r.PlayT = Time.unscaledTime;
+                return s;
             }
-            float delay = Mathf.Clamp(0.06f + 2.5f * r.Jitter, 0.08f, 0.3f);
-            float t = Time.unscaledTime - r.Offset - delay;
+            float t = r.PlayT = PlayTime(r);
             if (t <= list[0].T)
             {
-                return list[0].Feet;
+                s.Take(list[0]);
+                return s;
             }
             for (int i = list.Count - 1; i >= 1; i--)
             {
@@ -375,17 +467,85 @@ namespace Killcraft
                 float dt = b.T - a.T;
                 if (dt <= 0.0001f || (b.Feet - a.Feet).sqrMagnitude > 60f * 60f)
                 {
-                    return b.Feet;
+                    s.Take(b);  // (a teleport: there at once)
+                    return s;
                 }
+                s.Take(a);
                 float u = (t - a.T) / dt, u2 = u * u, u3 = u2 * u;
                 float h00 = 2f * u3 - 3f * u2 + 1f, h10 = u3 - 2f * u2 + u, h01 = -2f * u3 + 3f * u2, h11 = u3 - u2;
                 // (Speeds that don't fit the distance, as a dash's start: straight between them instead.)
                 Vector3 straight = Vector3.Lerp(a.Feet, b.Feet, u);
                 Vector3 curve = h00 * a.Feet + h10 * dt * a.Velocity + h01 * b.Feet + h11 * dt * b.Velocity;
-                return (curve - straight).sqrMagnitude > 4f ? straight : curve;
+                s.Feet = (curve - straight).sqrMagnitude > 4f ? straight : curve;
+                s.Velocity = Vector3.Lerp(a.Velocity, b.Velocity, u);
+                s.Yaw = Mathf.LerpAngle(a.Yaw, b.Yaw, u);
+                s.Look = Vector3.Slerp(a.Look, b.Look, u);
+                return s;
             }
             Snap last = list[list.Count - 1];
-            return last.Feet + last.Velocity * Mathf.Min(t - last.T, 0.25f);
+            s.Take(last);
+            s.Feet = last.Feet + last.Velocity * Mathf.Min(t - last.T, RemoteTuning.ExtrapolateMax);
+            s.Extrapolated = t - last.T > 0.001f;
+            return s;
+        }
+
+        // Their moves whose moment has come, in order.
+        private static void PlayMoves(Remote r)
+        {
+            List<Move> moves = r.Moves;
+            while (moves.Count > 0 && moves[0].T <= r.PlayT)
+            {
+                Move m = moves[0];
+                moves.RemoveAt(0);
+                Play(r, m.Kind, m.Value, m.T);
+            }
+        }
+
+        // A move of theirs played (an event of theirs; not a jump or landing made up from their state
+        // just before, when the event seemed lost).
+        private static void Play(Remote r, byte move, float value, float at)
+        {
+            if (move == V1Body.MoveJump)
+            {
+                if (at - r.JumpMadeUpAt < RemoteTuning.EventFallbackWindow)
+                {
+                    return;
+                }
+                r.JumpedAt = at;
+            }
+            else if (move == V1Body.MoveLand)
+            {
+                if (at - r.LandMadeUpAt < RemoteTuning.EventFallbackWindow)
+                {
+                    return;
+                }
+                r.LandedAt = at;
+            }
+            if (r.V1 != null && r.Body != null && r.Body.activeSelf)
+            {
+                r.V1.Move(move, value);
+            }
+        }
+
+        // A jump or a landing seen in their state (off the ground going up; back on it) with no event
+        // of it come (lost: they're sent unreliably): made up.
+        private static void MakeUpMoves(Remote r, in Sampled s, bool ground, bool sliding, bool dash, bool wasGround)
+        {
+            if (!r.Timed || !r.Placed || r.V1 == null)
+            {
+                return;
+            }
+            float t = r.PlayT;
+            if (!ground && wasGround && !sliding && !dash && s.Velocity.y > 3f && t - r.JumpedAt > RemoteTuning.EventFallbackWindow)
+            {
+                r.JumpedAt = r.JumpMadeUpAt = t;
+                r.V1.Move(V1Body.MoveJump, 0f, false);
+            }
+            else if (ground && !wasGround && t - r.LandedAt > RemoteTuning.EventFallbackWindow)
+            {
+                r.LandedAt = r.LandMadeUpAt = t;
+                r.V1.Move(V1Body.MoveLand, Mathf.Clamp01(Mathf.Max(0f, -r.ShownVelocity.y) / 100f), false);
+            }
         }
 
         // A shot of theirs (Shots): their muzzle flashes, and a shotgun pumps.
@@ -445,13 +605,40 @@ namespace Killcraft
             }
         }
 
-        // What ULTRAKILL told their own PlayerAnimations (a shot, punch, coin toss, jump, landing).
+        // What ULTRAKILL told their own PlayerAnimations (a shot, punch, coin toss, jump, landing): kept
+        // for its moment of their timeline, when the body's where they were then (an older Killcraft's,
+        // without its time, or one off their timeline by more than EventMaxWait: played now).
         public static void HandleMove(int from, BinaryReader r)
         {
-            V1Body.Read(r, out byte move, out float value);
-            if (remotes.TryGetValue(from, out Remote remote) && remote.V1 != null && remote.Body != null && remote.Body.activeSelf)
+            if (NetSim.Hold(from, V1Body.Moves, r))
             {
-                remote.V1.Move(move, value);
+                return;
+            }
+            HandleMoveNow(from, r);
+        }
+
+        private static void HandleMoveNow(int from, BinaryReader r)
+        {
+            V1Body.Read(r, out byte move, out float value, out float at);
+            if (!remotes.TryGetValue(from, out Remote remote))
+            {
+                return;
+            }
+            if (float.IsNaN(at) || !remote.Timed || float.IsNaN(remote.Offset) || Mathf.Abs(at - remote.PlayT) > RemoteTuning.EventMaxWait)
+            {
+                Play(remote, move, value, remote.PlayT);
+                return;
+            }
+            List<Move> list = remote.Moves;
+            int i = list.Count;
+            while (i > 0 && list[i - 1].T > at)
+            {
+                i--;
+            }
+            list.Insert(i, new Move { T = at, Kind = move, Value = value });
+            if (list.Count > 64)
+            {
+                list.RemoveAt(0);
             }
         }
 
@@ -495,6 +682,7 @@ namespace Killcraft
             }
             if (!show)
             {
+                r.Moves.Clear();  // (not drawn: its moves not saved up for when it is)
                 return;
             }
             bool hide = id == HiddenId;
@@ -507,27 +695,41 @@ namespace Killcraft
                 Hide(r.Held, hide);
             }
             ItemLight(r);
-            bool ground = (r.Flags & FlagGround) != 0, sliding = (r.Flags & FlagSliding) != 0, dash = (r.Flags & FlagDash) != 0;
-            // Where they are now, about: their last place carried on by their speed (a tenth of a second
-            // at most), eased into so it doesn't jitter; on the ground, right on it.
-            Vector3 target = Interpolated(r);
-            if (ground && Physics.Raycast(target + Vector3.up * 1.5f, Vector3.down, out RaycastHit hit, 3f, LayerMaskDefaults.Get(LMD.Environment), QueryTriggerInteraction.Ignore))
+            float dt = Mathf.Clamp(Time.unscaledDeltaTime, 1e-4f, 0.1f);
+            // All of their state as of the one moment of their timeline that's shown now.
+            Sampled s = Sample(r);
+            r.Extrapolated = s.Extrapolated;
+            bool ground = (s.Flags & FlagGround) != 0, sliding = (s.Flags & FlagSliding) != 0, dash = (s.Flags & FlagDash) != 0,
+                slam = (s.Flags & FlagSlam) != 0, hook = (s.Flags & FlagHook) != 0;
+            // On the ground: the feet on the floor found under them, if it's near (not down a step or
+            // ledge they were only half over).
+            Vector3 target = s.Feet;
+            if (ground && Physics.Raycast(target + Vector3.up * 1.5f, Vector3.down, out RaycastHit hit, 1.5f + RemoteTuning.GroundSnapMax, LayerMaskDefaults.Get(LMD.Environment), QueryTriggerInteraction.Ignore)
+                && Mathf.Abs(hit.point.y - target.y) <= RemoteTuning.GroundSnapMax)
             {
                 target.y = hit.point.y;
             }
+            // (Eased into, a little, against the odd step in the timeline; far off, there at once.)
             r.Shown = r.Placed && (target - r.Shown).sqrMagnitude < 60f * 60f
-                ? Vector3.Lerp(r.Shown, target, 1f - Mathf.Exp((r.Timed ? -35f : -15f) * Time.unscaledDeltaTime))
+                ? Vector3.Lerp(r.Shown, target, 1f - Mathf.Exp(-(r.Timed ? RemoteTuning.PositionEase : 15f) * dt))
                 : target;
-            float ease = 1f - Mathf.Exp(-18f * Time.unscaledDeltaTime);
             if (!r.Placed)
             {
-                r.ShownYaw = r.Yaw;
-                r.ShownLook = r.Look;
-                r.ShownVelocity = r.Velocity;
+                r.ShownYaw = s.Yaw;
+                r.ShownLook = s.Look;
+                r.ShownVelocity = s.Velocity;
             }
-            r.ShownYaw = Mathf.LerpAngle(r.ShownYaw, r.Yaw, ease);
-            r.ShownLook = Vector3.Slerp(r.ShownLook, r.Look, ease);
-            r.ShownVelocity = Vector3.Lerp(r.ShownVelocity, r.Velocity, 1f - Mathf.Exp(-10f * Time.unscaledDeltaTime));
+            float ease = 1f - Mathf.Exp(-RemoteTuning.YawEase * dt);
+            r.ShownYaw = Mathf.LerpAngle(r.ShownYaw, s.Yaw, ease);
+            r.ShownLook = Vector3.Slerp(r.ShownLook, s.Look, ease);
+            bool wasGround = r.WasGround, wasSliding = r.WasSliding, wasDash = r.WasDash;
+            // Their moves whose moment has come; a jump or landing whose event was lost, from their state.
+            PlayMoves(r);
+            MakeUpMoves(r, s, ground, sliding, dash, wasGround);
+            r.ShownVelocity = Vector3.Lerp(r.ShownVelocity, s.Velocity, 1f - Mathf.Exp(-RemoteTuning.VelocityEase * dt));
+            r.WasGround = ground;
+            r.WasSliding = sliding;
+            r.WasDash = dash;
             r.Placed = true;
             Transform t = r.Body.transform;
             t.rotation = Quaternion.Euler(0f, r.ShownYaw, 0f);
@@ -535,8 +737,14 @@ namespace Killcraft
             {
                 // (Its root is V1's middle, as this player's is.)
                 t.position = r.Shown + Vector3.up * Coords.FeetBelowRoot;
-                r.V1.Pose(r.ShownVelocity, ground, sliding, dash, r.Weapon, r.Alt);
-                r.V1.Look(Profiles.Of(id), r.Weapon, r.Alt, r.Variant);
+                r.V1.Pose(r.ShownVelocity, ground, sliding, dash, slam, hook, s.Weapon, s.Alt, dt);
+                r.V1.Look(Profiles.Of(id), s.Weapon, s.Alt, r.Variant);
+                if (debugOn)
+                {
+                    DebugMark(r);
+                    r.Debug = $"delay {r.Delay * 1000f:0}ms jitter {r.Jitter * 1000f:0}ms snaps {r.Snaps.Count} moves {r.Moves.Count}"
+                        + $"{(s.Extrapolated ? " EXTRAPOLATING" : "")} raw-drawn {(r.Feet - r.Shown).magnitude:0.00}\n  {r.V1.Describe()}";
+                }
                 return;
             }
             t.position = r.Shown + Vector3.up * r.FeetToRoot;
@@ -547,9 +755,9 @@ namespace Killcraft
             {
                 return;
             }
-            Vector3 flat = new Vector3(r.Velocity.x, 0f, r.Velocity.z);
+            Vector3 flat = new Vector3(s.Velocity.x, 0f, s.Velocity.z);
             // What they just started doing: as V2 does it.
-            if (sliding && !r.WasSliding)
+            if (sliding && !wasSliding)
             {
                 r.Anim.Play("Slide", 0, 0f);
             }
@@ -557,20 +765,17 @@ namespace Killcraft
             {
                 r.SlideEffect.SetActive(sliding);
             }
-            if (dash && !r.WasDash)
+            if (dash && !wasDash)
             {
                 r.Anim.SetTrigger("Jump");
                 Effect(r.DodgeEffect, r.Shown + Vector3.up * 2f, flat.sqrMagnitude > 1f ? Quaternion.LookRotation(flat) : t.rotation);
                 Effect(r.DashSound, r.Shown, t.rotation);
             }
-            else if (!ground && r.WasGround && r.Velocity.y > 3f && !sliding)
+            else if (!ground && wasGround && s.Velocity.y > 3f && !sliding)
             {
                 r.Anim.SetTrigger("Jump");
                 Effect(r.JumpSound, r.Shown, t.rotation);
             }
-            r.WasGround = ground;
-            r.WasSliding = sliding;
-            r.WasDash = dash;
 
             bool running = ground && !sliding && !dash && flat.magnitude > 1.5f;
             // (As V2 does: its body faces where it goes, its root where it looks.)
@@ -1297,8 +1502,105 @@ namespace Killcraft
             return new GunClips();
         }
 
+        // ---- debug: raw against drawn, the animator's state; pretend lag (NetSim) ----
+
+        private static bool debugOn;
+        private static GUIStyle debugStyle;
+
+        // F8 with Debug/Diagnostics on: the readout and the markers.
+        private static void DebugKeys()
+        {
+            if (!Plugin.Diagnostics.Value)
+            {
+                return;
+            }
+            var kb = UnityEngine.InputSystem.Keyboard.current;
+            if (kb != null && kb.f8Key.wasPressedThisFrame)
+            {
+                debugOn = !debugOn;
+                Plugin.Log.LogInfo($"KillNet: remote player debug {(debugOn ? "on" : "off")} (lag {Plugin.SimLatencyMs.Value} ms, loss {Plugin.SimLossPercent.Value}%)");
+                if (!debugOn)
+                {
+                    foreach (Remote r in remotes.Values)
+                    {
+                        if (r.RawMarker != null)
+                        {
+                            r.RawMarker.SetActive(false);
+                        }
+                        if (r.ShownMarker != null)
+                        {
+                            r.ShownMarker.SetActive(false);
+                        }
+                    }
+                }
+            }
+        }
+
+        private static void DebugMark(Remote r)
+        {
+            if (r.RawMarker == null)
+            {
+                r.RawMarker = Marker(new Color(1f, 0.2f, 0.2f, 0.8f), 0.35f);
+                r.ShownMarker = Marker(new Color(0.2f, 1f, 0.2f, 0.8f), 0.25f);
+            }
+            r.RawMarker.SetActive(true);
+            r.ShownMarker.SetActive(true);
+            r.RawMarker.transform.position = r.Feet + Vector3.up * 0.2f;
+            r.ShownMarker.transform.position = r.Shown + Vector3.up * 0.2f;
+        }
+
+        private static GameObject Marker(Color c, float size)
+        {
+            GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            go.name = "Killcraft remote player debug marker";
+            Collider col = go.GetComponent<Collider>();
+            if (col != null)
+            {
+                UnityEngine.Object.Destroy(col);
+            }
+            go.transform.localScale = Vector3.one * size;
+            Renderer rd = go.GetComponent<Renderer>();
+            Shader sh = Shader.Find("Unlit/Color") ?? Shader.Find("Sprites/Default") ?? Shader.Find("Legacy Shaders/Diffuse");
+            if (sh != null)
+            {
+                rd.sharedMaterial = new Material(sh);
+            }
+            rd.material.color = c;
+            rd.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            return go;
+        }
+
+        // (Host.OnGUI.)
+        public static void Gui()
+        {
+            if (!debugOn || remotes.Count == 0)
+            {
+                return;
+            }
+            debugStyle ??= new GUIStyle(GUI.skin.label) { fontSize = 14, wordWrap = false, alignment = TextAnchor.UpperLeft };
+            var sb = new System.Text.StringBuilder();
+            sb.Append($"remote players (F8)  sim lag {Plugin.SimLatencyMs.Value} ms  loss {Plugin.SimLossPercent.Value}%  held {NetSim.Waiting}\n");
+            foreach (var kv in remotes)
+            {
+                Remote r = kv.Value;
+                sb.Append($"#{kv.Key} ").Append(r.Body != null && r.Body.activeSelf ? r.Debug : "not drawn").Append('\n');
+            }
+            string text = sb.ToString();
+            var rect = new Rect(12f, 90f, Screen.width - 24f, 400f);
+            GUI.color = Color.black;
+            GUI.Label(new Rect(rect.x + 1f, rect.y + 1f, rect.width, rect.height), text, debugStyle);
+            GUI.color = Color.white;
+            GUI.Label(rect, text, debugStyle);
+        }
+
         private static void Destroy(Remote r)
         {
+            if (r.RawMarker != null)
+            {
+                UnityEngine.Object.Destroy(r.RawMarker);
+                UnityEngine.Object.Destroy(r.ShownMarker);
+                r.RawMarker = r.ShownMarker = null;
+            }
             if (r.Body != null)
             {
                 UnityEngine.Object.Destroy(r.Body);

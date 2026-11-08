@@ -55,6 +55,10 @@ You don't need SkyCraft or Skyrim: the Killcraft download already has SkyCraft's
 
 **Easiest:** download `KillNet-Launcher-<version>.exe` from **Releases** and run it. It finds ULTRAKILL, installs BepInEx and Killcraft, and keeps everything updated. MINECRAFT: ON/OFF picks Killcraft or KillNet.
 
+> **"Windows protected your PC"?** The launcher isn't code-signed (a signing certificate costs money), so Windows SmartScreen warns about any new exe like it. Click **More info**, then **Run anyway**. Its source is in this repo (`launcher/app`) if you want to check it or build it yourself.
+>
+> **Installed with r2modman, Gale or the Thunderstore app?** Start ULTRAKILL from there instead: the launcher is for installs in the game's own folder.
+
 **By hand:**
 
 1. Download `Killcraft-<version>.zip` from this page's **Releases** and unzip it into `ULTRAKILL\BepInEx\plugins\`, so you have `ULTRAKILL\BepInEx\plugins\Killcraft\Killcraft.dll`. Leave `SkyCraft-Minecraft.zip` in that folder zipped.

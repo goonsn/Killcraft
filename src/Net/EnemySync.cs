@@ -553,7 +553,57 @@ namespace Killcraft
                 {
                     w.Write(HealthOf(list[i]));
                 }
+                // (Newer still: each one's radiance - an Idol's, a sand zone's, a level's - as flags; then
+                // for each radiant one its tier and how much each buff does.)
+                for (int i = 0; i < list.Count && i < 600; i++)
+                {
+                    w.Write(RadianceOf(list[i]));
+                }
+                for (int i = 0; i < list.Count && i < 600; i++)
+                {
+                    EnemyIdentifier eid = list[i];
+                    if (RadianceOf(eid) != 0)
+                    {
+                        w.Write(eid.radianceTier);
+                        w.Write(eid.speedBuffModifier);
+                        w.Write(eid.healthBuffModifier);
+                        w.Write(eid.damageBuffModifier);
+                    }
+                }
             });
+        }
+
+        private static byte RadianceOf(EnemyIdentifier eid) => (byte)((eid.speedBuff ? 1 : 0) | (eid.healthBuff ? 2 : 0) | (eid.damageBuff ? 4 : 0));
+
+        // A puppet radiant as the authority's enemy is (its glow, its speed, its hits), changed only when
+        // it differs (each change is ULTRAKILL's radiance flash).
+        private static void SetRadiance(EnemyIdentifier eid, byte flags, float tier, float speed, float health, float damage)
+        {
+            bool same = RadianceOf(eid) == flags && (flags == 0 || (Mathf.Abs(eid.radianceTier - tier) < 0.01f
+                && Mathf.Abs(eid.speedBuffModifier - speed) < 0.01f && Mathf.Abs(eid.healthBuffModifier - health) < 0.01f
+                && Mathf.Abs(eid.damageBuffModifier - damage) < 0.01f));
+            if (same)
+            {
+                return;
+            }
+            if (flags != 0)
+            {
+                eid.radianceTier = tier;
+                eid.speedBuffModifier = speed;
+                eid.healthBuffModifier = health;
+                eid.damageBuffModifier = damage;
+            }
+            eid.speedBuffRequests = (flags & 1) != 0 ? 1 : 0;
+            eid.healthBuffRequests = (flags & 2) != 0 ? 1 : 0;
+            eid.damageBuffRequests = (flags & 4) != 0 ? 1 : 0;
+            try
+            {
+                eid.UpdateBuffs();
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogWarning($"KillNet: couldn't make {eid.name} radiant as the authority's is ({e.Message})");
+            }
         }
 
         private static float HealthOf(EnemyIdentifier eid)
@@ -683,6 +733,29 @@ namespace Killcraft
                     if (byId.TryGetValue(order[i], out EnemyIdentifier e) && e != null && !e.dead)
                     {
                         SetHealth(e, h);
+                    }
+                }
+                if (r.BaseStream.Length - r.BaseStream.Position >= n)
+                {
+                    byte[] flags = r.ReadBytes(n);
+                    for (int i = 0; i < n; i++)
+                    {
+                        float tier = 1f, speed = 1.5f, health = 1.5f, damage = 1.5f;
+                        if (flags[i] != 0)
+                        {
+                            if (r.BaseStream.Length - r.BaseStream.Position < 16)
+                            {
+                                break;
+                            }
+                            tier = r.ReadSingle();
+                            speed = r.ReadSingle();
+                            health = r.ReadSingle();
+                            damage = r.ReadSingle();
+                        }
+                        if (byId.TryGetValue(order[i], out EnemyIdentifier e) && e != null && !e.dead)
+                        {
+                            SetRadiance(e, flags[i], tier, speed, health, damage);
+                        }
                     }
                 }
             }

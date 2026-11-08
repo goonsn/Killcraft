@@ -20,7 +20,7 @@ namespace Killcraft
     internal sealed class V1Body
     {
         public const byte Moves = 3;
-        private const byte MoveShoot = 0, MovePunch = 1, MoveCoin = 2, MoveJump = 3, MoveLand = 4;
+        internal const byte MoveShoot = 0, MovePunch = 1, MoveCoin = 2, MoveJump = 3, MoveLand = 4;
 
         private static readonly AccessTools.FieldRef<PlayerAnimations, Transform> chestOf = AccessTools.FieldRefAccess<PlayerAnimations, Transform>("chest");
         private static readonly AccessTools.FieldRef<PlayerAnimations, Transform> headOf = AccessTools.FieldRefAccess<PlayerAnimations, Transform>("head");
@@ -45,7 +45,8 @@ namespace Killcraft
         // Alive above the legs (V1Motion), from what they're doing.
         private readonly V1Motion motion = new V1Motion();
         private Vector3 velocity;
-        private bool onGround, still;
+        private bool onGround, still, slamming, hooked;
+        private float dt = 1f / 60f;
         // Its guns' parts (painted, coloured by variant: Skins) and its body's colour.
         private List<Skins.Part> parts = new List<Skins.Part>();
         private readonly Skins.Body skin = new Skins.Body();
@@ -180,6 +181,9 @@ namespace Killcraft
             {
                 anim.cullingMode = AnimatorCullingMode.AlwaysAnimate;
                 anim.applyRootMotion = false;
+                // (Their time, not this player's: they go on at full speed through this V1's slow
+                // motion, as their position does.)
+                anim.updateMode = AnimatorUpdateMode.UnscaledTime;
             }
             if (!loggedParts)
             {
@@ -215,21 +219,25 @@ namespace Killcraft
 
         // ---- each frame (as PlayerAnimations.LateUpdate, from what they sent) ----
 
-        // Before the animations: what it's doing. Root is at their V1's middle, turned their way.
-        public void Pose(Vector3 velocity, bool ground, bool sliding, bool dodging, byte weapon, bool alt)
+        // Before the animations: what it's doing (as of the moment of their timeline that's shown:
+        // RemotePlayers samples it all at one time, so the body's pose and its place agree). Root is
+        // at their V1's middle, turned their way. dt: this frame, unscaled (the animator runs unscaled).
+        public void Pose(Vector3 velocity, bool ground, bool sliding, bool dodging, bool slam, bool hook, byte weapon, bool alt, float dt)
         {
             if (anim == null)
             {
                 return;
             }
+            this.dt = dt = Mathf.Clamp(dt, 1e-4f, 0.1f);
             ShowWeapon(weapon, alt);
             this.velocity = velocity;
             onGround = ground;
             still = sliding || dodging;
+            slamming = slam && !ground;
+            hooked = hook;
             anim.SetBool("Dodging", dodging);
             anim.SetBool("InAir", !ground);
             anim.SetBool("Sliding", sliding);
-            float dt = Time.deltaTime;
             float land = anim.layerCount > 1 ? anim.GetLayerWeight(1) : 0f;
             if (land > 0f)
             {
@@ -248,12 +256,20 @@ namespace Killcraft
             model.rotation = directionLerp > 0f && velocity.sqrMagnitude > 0.01f
                 ? Quaternion.Lerp(rest, Quaternion.LookRotation(velocity.normalized), directionLerp)
                 : rest;
-            // (Its strides are as much longer as it's bigger: as many a second as V1's own at its speed
-            // looked like running on the spot.)
-            Vector3 local = Quaternion.Inverse(Root.transform.rotation) * (velocity / (15f * Mathf.Sqrt(sizeUp)));
-            Vector3 dodge = new Vector3(local.x, 0f, local.z).normalized;
-            anim.SetFloat("VelX", dodging ? dodge.x : local.x);
-            anim.SetFloat("VelY", dodging ? dodge.z : local.z);
+            // The run blend as PlayerAnimations sets it (its full stride at 15 a second), damped a
+            // little against the 20-a-second steps in what they say; a dash's direction at once.
+            Vector3 local = Quaternion.Inverse(Root.transform.rotation) * (velocity / RemoteTuning.RunClipSpeed);
+            if (dodging)
+            {
+                Vector3 dodge = new Vector3(local.x, 0f, local.z).normalized;
+                anim.SetFloat("VelX", dodge.x);
+                anim.SetFloat("VelY", dodge.z);
+            }
+            else
+            {
+                anim.SetFloat("VelX", local.x, RemoteTuning.VelocityDamp, dt);
+                anim.SetFloat("VelY", local.z, RemoteTuning.VelocityDamp, dt);
+            }
         }
 
         // After the animations: chest, head and gun arm where they look.
@@ -280,7 +296,7 @@ namespace Killcraft
             head.rotation = camera;
             if (aimerWeight < 1f)
             {
-                aimerWeight = Mathf.MoveTowards(aimerWeight, 1f, Time.deltaTime * (5f * aimerSpeed));
+                aimerWeight = Mathf.MoveTowards(aimerWeight, 1f, dt * (5f * aimerSpeed));
             }
             if (shownWeapon < 2)
             {
@@ -292,7 +308,44 @@ namespace Killcraft
                 chest.rotation = Quaternion.Lerp(chest.rotation, chestWas, leftArmWeight);
                 head.rotation = Quaternion.Lerp(head.rotation, headWas, leftArmWeight);
             }
-            motion.Run(model, Root.transform, velocity, onGround, still, chest, head, rightArm, leftArm, leftArmWeight <= 0.01f, anim);
+            motion.Run(model, Root.transform, velocity, onGround, still, chest, head, rightArm, leftArm, leftArmWeight <= 0.01f, anim,
+                dt, slamming, hooked, look, sizeUp);
+        }
+
+        // For the debug readout (RemotePlayers): the animator's state and what drives it.
+        public string Describe()
+        {
+            if (anim == null)
+            {
+                return "no animator";
+            }
+            string state = "?";
+            AnimatorStateInfo info = anim.GetCurrentAnimatorStateInfo(0);
+            foreach (string name in new[] { "Grounded", "Slide", "Jump", "InAir", "Dodging", "Intro", "KnockedDown", "Flailing" })
+            {
+                if (info.IsName(name))
+                {
+                    state = name;
+                    break;
+                }
+            }
+            string arm = "?";
+            if (anim.layerCount > 2)
+            {
+                AnimatorStateInfo a = anim.GetCurrentAnimatorStateInfo(2);
+                foreach (string name in new[] { "WeaponHoldSmall", "WeaponHoldBig", "WeaponShootBig", "WeaponShootSmall", "WeaponChangeBig", "WeaponChangeSmall" })
+                {
+                    if (a.IsName(name))
+                    {
+                        arm = name;
+                        break;
+                    }
+                }
+            }
+            return $"{state}{(anim.IsInTransition(0) ? "~" : "")} vel {anim.GetFloat("VelX"):0.00},{anim.GetFloat("VelY"):0.00} "
+                + $"air {(anim.GetBool("InAir") ? 1 : 0)} slide {(anim.GetBool("Sliding") ? 1 : 0)} dodge {(anim.GetBool("Dodging") ? 1 : 0)} "
+                + $"slam {(slamming ? 1 : 0)} hook {(hooked ? 1 : 0)} land {(anim.layerCount > 1 ? anim.GetLayerWeight(1) : 0f):0.00} "
+                + $"legs x{anim.speed:0.00} arm {arm} weapon {shownWeapon}{(shownAlt ? "alt" : "")}";
         }
 
         private void Aim(Transform aimer, Quaternion camera)
@@ -367,10 +420,10 @@ namespace Killcraft
 
         private VariantGuns guns;
 
-        // What ULTRAKILL told their PlayerAnimations.
-        public void Move(byte move, float value)
+        // What ULTRAKILL told their PlayerAnimations (heard: from them; else made up from their state).
+        public void Move(byte move, float value, bool heard = true)
         {
-            HeardMoves = true;
+            HeardMoves |= heard;
             if (anim == null)
             {
                 return;
@@ -456,13 +509,18 @@ namespace Killcraft
             {
                 w.Write(move);
                 w.Write(value);
+                // (Newer: when, by this player's clock, as PlayerState says it: played on the others'
+                // screens at that moment of this player's timeline, with the body where it was then.)
+                w.Write(Time.unscaledTime);
             });
         }
 
-        public static void Read(BinaryReader r, out byte move, out float value)
+        // (at: when, by their clock; NaN from an older Killcraft.)
+        public static void Read(BinaryReader r, out byte move, out float value, out float at)
         {
             move = r.ReadByte();
             value = r.ReadSingle();
+            at = r.BaseStream.Length - r.BaseStream.Position >= 4 ? r.ReadSingle() : float.NaN;
         }
     }
 

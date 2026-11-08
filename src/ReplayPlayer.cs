@@ -53,6 +53,9 @@ namespace Killcraft
         // The one who saved it: their fire buttons, each change (newer replays): their guns here are
         // fired with them, so they charge, overheat, spin, throw coins and saws as they did.
         private static readonly List<KeyValuePair<float, byte>> inputs = new List<KeyValuePair<float, byte>>();
+        // (Which arm the recorder had out, from when: newer replays only.)
+        private static readonly List<KeyValuePair<float, byte>> arms = new List<KeyValuePair<float, byte>>();
+        private static int viewerArm = -1;
         private static GameObject wantedGun, fallFx;
         private static float switchedAt, slideTriedAt;
         private static bool slammingWas;
@@ -160,11 +163,16 @@ namespace Killcraft
         {
             tracks.Clear();
             inputs.Clear();
+            arms.Clear();
             foreach (Replay.Rec r in recs)
             {
                 if (r.Type == Replay.InputEvent && r.Data.Length >= 1)
                 {
                     inputs.Add(new KeyValuePair<float, byte>(r.T, r.Data[0]));
+                    if (r.Data.Length >= 2 && r.Data[1] != 255)
+                    {
+                        arms.Add(new KeyValuePair<float, byte>(r.T, r.Data[1]));
+                    }
                     continue;
                 }
                 if (r.Type != KillNet.PlayerState)
@@ -274,6 +282,40 @@ namespace Killcraft
             return t - pressed < 6f ? Mathf.Max(0f, pressed - 0.1f) : t;
         }
 
+        // The recorder's arm out now (if this player has it too).
+        private static void Arm(FistControl fc)
+        {
+            if (arms.Count == 0)
+            {
+                return;
+            }
+            int found = -1;
+            for (int k = arms.Count - 1; k >= 0; k--)
+            {
+                if (arms[k].Key <= clock)
+                {
+                    found = k;
+                    break;
+                }
+            }
+            int want = arms[found >= 0 ? found : 0].Value;
+            int now = Replay.ArmOf(fc);
+            if (viewerArm < 0)
+            {
+                viewerArm = now;
+            }
+            if (want != now)
+            {
+                try
+                {
+                    fc.ForceArm(want);
+                }
+                catch
+                {
+                }
+            }
+        }
+
         private static byte InputsAt(float t)
         {
             int lo = 0, hi = inputs.Count - 1, found = -1;
@@ -298,9 +340,10 @@ namespace Killcraft
 
         public static bool RealGuns(int from) => Injecting && from == pov;
 
-        private static readonly bool[] inNow = new bool[2];
-        private static readonly int[] inPerformed = { -1, -1 }, inCanceled = { -1, -1 };
-        private static readonly float[] inPerformedTime = new float[2];
+        // (Fire1, Fire2, Punch, Hook.)
+        private static readonly bool[] inNow = new bool[4];
+        private static readonly int[] inPerformed = { -1, -1, -1, -1 }, inCanceled = { -1, -1, -1, -1 };
+        private static readonly float[] inPerformedTime = new float[4];
         private static int inFrame = -1;
 
         private static void EvalInputs()
@@ -311,7 +354,7 @@ namespace Killcraft
             }
             inFrame = Time.frameCount;
             byte bits = InputsAt(clock);
-            for (int k = 0; k < 2; k++)
+            for (int k = 0; k < 4; k++)
             {
                 bool p = (bits >> k & 1) != 0;
                 if (p && !inNow[k])
@@ -339,8 +382,13 @@ namespace Killcraft
             {
                 return -1;
             }
-            return s == src.Fire1 ? 0 : s == src.Fire2 ? 1 : -1;
+            return s == src.Fire1 ? 0 : s == src.Fire2 ? 1 : s == src.Punch ? 2 : s == src.Hook ? 3 : -1;
         }
+
+        // Paused: no shaking. (V1 held mid-slide has ULTRAKILL shake the camera again each frame, and
+        // with time stopped it never dies down.)
+        [HarmonyPatch(typeof(CameraController), nameof(CameraController.CameraShake)), HarmonyPrefix]
+        private static bool ShakeWhilePaused() => !(active && paused);
 
         [HarmonyPatch(typeof(InputActionState), nameof(InputActionState.IsPressed), MethodType.Getter), HarmonyPrefix]
         private static bool PressedGet(InputActionState __instance, ref bool __result)
@@ -402,6 +450,37 @@ namespace Killcraft
             return false;
         }
 
+        // (The Knuckleblaster's held punch - its blast - asks the punch button itself, not ULTRAKILL's
+        // input state: that button answered from the recording too.)
+        private static bool IsPunchAction(InputAction a)
+        {
+            if (!Injecting || a == null)
+            {
+                return false;
+            }
+            InputManager im = MonoSingleton<InputManager>.Instance;
+            PlayerInput src = im != null ? im.InputSource : null;
+            return src != null && src.Punch != null && a == src.Punch.Action;
+        }
+
+        [HarmonyPatch(typeof(InputAction), nameof(InputAction.IsPressed)), HarmonyPrefix]
+        private static bool ActionPressed(InputAction __instance, ref bool __result)
+        {
+            if (!IsPunchAction(__instance)) return true;
+            EvalInputs();
+            __result = inNow[2];
+            return false;
+        }
+
+        [HarmonyPatch(typeof(InputAction), nameof(InputAction.WasReleasedThisFrame)), HarmonyPrefix]
+        private static bool ActionReleased(InputAction __instance, ref bool __result)
+        {
+            if (!IsPunchAction(__instance)) return true;
+            EvalInputs();
+            __result = inCanceled[2] == Time.frameCount;
+            return false;
+        }
+
         // (The watched player on the ground: so is V1, as ULTRAKILL reckons it.)
         [HarmonyPatch(typeof(NewMovement), "Update"), HarmonyPrefix]
         private static void GroundBefore(NewMovement __instance)
@@ -416,6 +495,39 @@ namespace Killcraft
                 keptScrape = slideScrape(__instance);
                 slideParticle(__instance) = null;
                 slideScrape(__instance) = null;
+            }
+        }
+
+        // (V1's controls off, ULTRAKILL's Update puts the arm away every frame (NoFist), and each time it
+        // comes out again its animation starts over - no punch was ever seen. While the recorder's punches
+        // are played, it isn't put away at all.)
+        [HarmonyPatch(typeof(FistControl), nameof(FistControl.NoFist)), HarmonyPrefix]
+        private static bool KeepArmOut() => !Injecting;
+
+        // (And out, the one they had, if it was away when the replay began.)
+        [HarmonyPatch(typeof(NewMovement), "Update"), HarmonyPostfix]
+        private static void ArmAfter()
+        {
+            if (!Injecting)
+            {
+                return;
+            }
+            try
+            {
+                FistControl fc = MonoSingleton<FistControl>.Instance;
+                if (fc == null)
+                {
+                    return;
+                }
+                GameObject arm = fc.currentArmObject;
+                if (arm != null && !arm.activeSelf || !fc.activated)
+                {
+                    fc.YesFist();
+                }
+                Arm(fc);
+            }
+            catch
+            {
             }
         }
 
@@ -646,7 +758,8 @@ namespace Killcraft
                 Cursor.lockState = CursorLockMode.None;
                 Unselect();
                 Keys(gamePaused);
-                if (!gamePaused && !paused && !ended)
+                // (Not while the black's up after a jump on the timeline: it starts where it was put.)
+                if (!gamePaused && !paused && !ended && !covered)
                 {
                     clock = Mathf.Min(length, clock + Mathf.Min(Time.unscaledDeltaTime, 0.1f) * Speed);
                     Feed(clock, true);
@@ -654,16 +767,34 @@ namespace Killcraft
                     if (clock >= length && Leading)
                     {
                         ended = true;
+                        // (V1 still: not walking, not moving - its gun's walking bob stops.)
+                        if (nm.rb != null && !nm.rb.isKinematic)
+                        {
+                            nm.rb.velocity = Vector3.zero;
+                        }
                     }
+                }
+                if (ended)
+                {
+                    nm.walking = false;
                 }
                 // (Paused: the last of each player and of the enemies said again now and then, or
                 // they'd be taken for gone.)
                 if ((paused || gamePaused) && Time.unscaledTime > refreshAt)
                 {
                     refreshAt = Time.unscaledTime + 0.5f;
-                    foreach (Replay.Rec r in last.Values)
+                    // (Not their shots again: the gun would kick each time, over and over.)
+                    resaying = true;
+                    try
                     {
-                        Dispatch(r, true);
+                        foreach (Replay.Rec r in last.Values)
+                        {
+                            Dispatch(r, true);
+                        }
+                    }
+                    finally
+                    {
+                        resaying = false;
                     }
                 }
                 if (Time.unscaledTime > freshAt)
@@ -671,13 +802,33 @@ namespace Killcraft
                     freshAt = Time.unscaledTime + 1f;
                     Fresh();
                 }
-                Mimic(nm);
+                // (Over: V1 left as it was - not made to slide, dash or change guns again and again.)
+                if (!ended)
+                {
+                    Mimic(nm);
+                    endedAt = -1f;
+                    StillGun(false);
+                }
+                else
+                {
+                    Watch(nm);
+                    StillGun(true);
+                }
                 if (!gamePaused)
                 {
                     SetTimeScale(paused ? 0f : Speed);
                 }
                 ListenerPause(paused && !gamePaused);
                 StyleStill(paused);
+                // (Paused mid-shake: still at once.)
+                if (paused)
+                {
+                    CameraController shaker = MonoSingleton<CameraController>.Instance;
+                    if (shaker != null && shaker.cameraShaking > 0f)
+                    {
+                        shaker.StopShake();
+                    }
+                }
                 if (together && Leading && Time.unscaledTime - controlSentAt > 0.5f)
                 {
                     SendControl(false);
@@ -714,7 +865,7 @@ namespace Killcraft
                 return;
             }
             pending = false;
-            coverUntil = Time.unscaledTime + 0.5f;
+            coverUntil = Time.unscaledTime + 0.3f;
             // (The same level loaded again, going back: ULTRAKILL's level is new, so is what's kept of
             // it here: the enemies killed later on aren't dead yet.)
             EnemySync.LevelChanged();
@@ -772,7 +923,12 @@ namespace Killcraft
                 FistControl fc = MonoSingleton<FistControl>.Instance;
                 if (fc != null)
                 {
-                    fc.activated = false;
+                    // (On while the recorder's punches are played: the arm shows them, the one they had out.)
+                    fc.activated = Injecting;
+                    if (Injecting)
+                    {
+                        Arm(fc);
+                    }
                 }
                 if (nm.rb != null)
                 {
@@ -789,6 +945,7 @@ namespace Killcraft
 
         private static void Release()
         {
+            StillGun(false);
             try
             {
                 NewMovement nm = MonoSingleton<NewMovement>.Instance;
@@ -810,7 +967,13 @@ namespace Killcraft
                 if (fc != null)
                 {
                     fc.activated = true;
+                    // (The viewer's own arm back.)
+                    if (viewerArm >= 0 && Replay.ArmOf(fc) != viewerArm)
+                    {
+                        fc.ForceArm(viewerArm);
+                    }
                 }
+                viewerArm = -1;
             }
             catch
             {
@@ -1032,12 +1195,116 @@ namespace Killcraft
         // kicks the gun in V1's hand.
         public static void Shot(int from)
         {
-            if (!active || from != pov || Injecting || Time.unscaledTime - recoilAt < 0.06f)
+            if (!active || ended || resaying || from != pov || Injecting || Time.unscaledTime - recoilAt < 0.06f)
             {
                 return;
             }
             recoilAt = Time.unscaledTime;
             Recoil();
+        }
+
+        private static bool resaying;
+
+        // (Over: the gun in V1's hand held still - its idle animation, ULTRAKILL's own, stopped where
+        // it is - until the replay's played on again or left.)
+        private static readonly List<Animator> stilled = new List<Animator>();
+
+        private static void StillGun(bool on)
+        {
+            try
+            {
+                if (!on)
+                {
+                    if (stilled.Count > 0)
+                    {
+                        foreach (Animator a in stilled)
+                        {
+                            if (a != null)
+                            {
+                                a.speed = 1f;
+                            }
+                        }
+                        stilled.Clear();
+                    }
+                    return;
+                }
+                GunControl gc = MonoSingleton<GunControl>.Instance;
+                GameObject w = gc != null ? gc.currentWeapon : null;
+                if (w == null)
+                {
+                    return;
+                }
+                foreach (Animator a in w.GetComponentsInChildren<Animator>())
+                {
+                    if (a.speed != 0f && !stilled.Contains(a))
+                    {
+                        a.speed = 0f;
+                        stilled.Add(a);
+                    }
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        // (For a few seconds after the end: what V1's gun and the camera are doing, in the log.)
+        private static float endedAt = -1f, watchedAt;
+
+        private static void Watch(NewMovement nm)
+        {
+            if (!Plugin.Diagnostics.Value)
+            {
+                return;
+            }
+            float now = Time.unscaledTime;
+            if (endedAt < 0f)
+            {
+                endedAt = now;
+                watchedAt = 0f;
+            }
+            if (now - endedAt > 4f || now - watchedAt < 0.25f)
+            {
+                return;
+            }
+            watchedAt = now;
+            try
+            {
+                GunControl gc = MonoSingleton<GunControl>.Instance;
+                CameraController cc = MonoSingleton<CameraController>.Instance;
+                GameObject w = gc != null ? gc.currentWeapon : null;
+                var sb = new System.Text.StringBuilder();
+                sb.Append($"replay end +{now - endedAt:0.00}s: gun {(w != null ? w.name : "none")}");
+                if (w != null)
+                {
+                    sb.Append($" pos {w.transform.localPosition.ToString("F3")}");
+                    Transform up = w.transform.parent;
+                    if (up != null)
+                    {
+                        sb.Append($" holder {up.name} {up.localPosition.ToString("F3")}");
+                    }
+                    foreach (Animator a in w.GetComponentsInChildren<Animator>())
+                    {
+                        AnimatorStateInfo st = a.GetCurrentAnimatorStateInfo(0);
+                        sb.Append($" anim {a.name} state {st.shortNameHash} t {st.normalizedTime:0.00} speed {a.speed:0.00}");
+                        if (a.layerCount > 1)
+                        {
+                            sb.Append($" layer1 {a.GetLayerWeight(1):0.00}");
+                        }
+                        break;
+                    }
+                }
+                if (cc != null)
+                {
+                    sb.Append($" cam {cc.transform.localPosition.ToString("F3")}");
+                }
+                sb.Append($" walking {nm.walking} sliding {nm.sliding} vel {(nm.rb != null ? nm.rb.velocity.magnitude : 0f):0.0} gcOn {gc != null && gc.activated} timescale {Time.timeScale:0.00} switched {now - switchedAt:0.0}s ago");
+                Plugin.Log.LogInfo(sb.ToString());
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogInfo($"replay end: {e.Message}");
+            }
         }
 
         // Their shot: the gun in V1's hand kicks as it did.
@@ -1261,6 +1528,14 @@ namespace Killcraft
                     Array.Clear(data, 12, 12);
                 }
             }
+            else if (r.Type == V1Body.Moves && data.Length >= 9)
+            {
+                // (A move's time, by the same clock as the states' above: played at its moment of the
+                // timeline, with the body where it was then.)
+                data = (byte[])data.Clone();
+                byte[] now = BitConverter.GetBytes(Time.unscaledTime);
+                Buffer.BlockCopy(now, 0, data, data.Length - 4, 4);
+            }
             else if (still && r.Type == EnemySync.Snapshot && data.Length >= 4)
             {
                 // (Each enemy: its number, where, which way, how fast: how fast made nothing.)
@@ -1365,7 +1640,7 @@ namespace Killcraft
             {
                 if (to - clock > 1f)
                 {
-                    coverUntil = Time.unscaledTime + 0.6f;
+                    coverUntil = Time.unscaledTime + 0.3f;
                     Cover(true);
                 }
                 RunTo(to);

@@ -20,7 +20,7 @@ namespace Killcraft
         private sealed class MemberRow
         {
             public RectTransform Root;
-            public Image Strip, Crown;
+            public Image Strip, Crown, Glow;
             public RawImage Avatar;
             public TextMeshProUGUI Name, Status, Ping;
             public Image[] Bars;
@@ -54,29 +54,206 @@ namespace Killcraft
         private static float serversAskedAt = -100f;
         private static int popupFor = int.MinValue;
         private static int chatShown = -1;
-        private static readonly object chatOwner = new object(), codeOwner = new object(), nameOwner = new object();
+        private static readonly object chatOwner = new object(), codeOwner = new object(), nameOwner = new object(), maxOwner = new object();
 
         // CONNECT's parts.
         private enum Mode { Host, Join, Lobbies }
         private static Mode mode = Mode.Host;
         private static readonly UiButton[] connect = new UiButton[4];
         private static string bootShown = "";
-        private static TextMeshProUGUI boot, panelTitle, lobbiesStatus, joinHint;
+        private static TextMeshProUGUI boot, panelTitle, lobbiesStatus, joinHint, rejoinNote;
         private static GameObject hostPanel, joinPanel, lobbiesPanel;
         private static UiButton nameField, maxField, typeButton, cheatsButton, createButton, codeField, joinButton;
         private static RectTransform lobbies;
 
         public static bool Open => canvas != null && canvas.gameObject.activeSelf;
+        internal static Canvas MenuCanvas => canvas;
+        // (The main menu's own first screen up, the party screen not: back out of the level select.)
+        internal static bool MenuTopShown => mainMenu != null && mainMenu.activeInHierarchy && !Open;
+
+        // QUIT MISSION in a party: the party screen when the main menu's back.
+        public static bool OpenOnMenu;
+
+        // A wake (PartyWake): the party screen up, on the party's view.
+        // (The main menu's other screens beside it - the level select the host picked from - put away
+        // for the wake, and given back as they were if it's stopped.)
+        private static readonly List<GameObject> wakeHidden = new List<GameObject>();
+        private static bool menuWasUp = true, wakeOpened;
+
+        internal static void OpenForWake()
+        {
+            if (!Open)
+            {
+                if (!wakeOpened)
+                {
+                    menuWasUp = mainMenu == null || mainMenu.activeSelf;
+                }
+                wakeOpened = true;
+                Show();
+            }
+            Transform parent = mainMenu != null ? mainMenu.transform.parent : null;
+            if (parent == null)
+            {
+                return;
+            }
+            foreach (Transform t in parent)
+            {
+                GameObject g = t.gameObject;
+                if (g == mainMenu || !g.activeSelf || (canvas != null && t == canvas.transform))
+                {
+                    continue;
+                }
+                g.SetActive(false);
+                wakeHidden.Add(g);
+            }
+        }
+
+        // A wake stopped: the party screen away, the screen picked from back.
+        internal static void CloseAfterWake()
+        {
+            if (!wakeOpened)
+            {
+                return;
+            }
+            wakeOpened = false;
+            if (Typing.Owner == chatOwner)
+            {
+                Typing.End();
+            }
+            if (canvas != null)
+            {
+                canvas.gameObject.SetActive(false);
+            }
+            KillcraftPanel.Hide();
+            ShowMenu();
+            foreach (GameObject g in wakeHidden)
+            {
+                if (g != null)
+                {
+                    g.SetActive(true);
+                }
+            }
+            wakeHidden.Clear();
+            if (mainMenu != null)
+            {
+                mainMenu.SetActive(menuWasUp);
+            }
+        }
+
+        // (Gone to the level: nothing to give back.)
+        internal static void WakeDone()
+        {
+            wakeOpened = false;
+            wakeHidden.Clear();
+        }
+
+        // During a wake: the main menu's black and circuit diagram (or this screen's own black) away, and
+        // ULTRAKILL's main menu fall - the 3D scene under the menus - seen behind the party screen.
+        private static readonly List<GameObject> fallHidden = new List<GameObject>();
+        private static bool fallShown;
+
+        internal static void ShowFall(bool on)
+        {
+            if (on == fallShown)
+            {
+                return;
+            }
+            fallShown = on;
+            if (on)
+            {
+                if (mainMenu != null)
+                {
+                    foreach (string name in new[] { "Image", "BackgroundSwapper" })
+                    {
+                        Transform t = mainMenu.transform.Find(name);
+                        if (t != null && t.gameObject.activeSelf)
+                        {
+                            t.gameObject.SetActive(false);
+                            fallHidden.Add(t.gameObject);
+                        }
+                    }
+                }
+                if (ownBlack != null)
+                {
+                    ownBlack.enabled = false;
+                }
+                if (ownCode != null)
+                {
+                    ownCode.SetActive(false);
+                }
+                return;
+            }
+            foreach (GameObject g in fallHidden)
+            {
+                if (g != null)
+                {
+                    g.SetActive(true);
+                }
+            }
+            fallHidden.Clear();
+            if (ownBlack != null)
+            {
+                ownBlack.enabled = true;
+                if (ownCode != null)
+                {
+                    ownCode.SetActive(ownBlack.color.a > 0.5f);
+                }
+            }
+        }
+
+        // The screen's frame in a colour (red during a wake), its own or the main menu's.
+        private static Color[] borderWas;
+
+        internal static void TintFrame(Color c)
+        {
+            if (ownFrame != null)
+            {
+                Image f = ownFrame.GetComponent<Image>();
+                if (f != null && f.color != c)
+                {
+                    f.color = c;
+                }
+            }
+            Transform border = mainMenu != null ? mainMenu.transform.Find("Border") : null;
+            if (border == null)
+            {
+                return;
+            }
+            Image[] parts = border.GetComponentsInChildren<Image>(true);
+            if (borderWas == null || borderWas.Length != parts.Length)
+            {
+                borderWas = new Color[parts.Length];
+                for (int i = 0; i < parts.Length; i++)
+                {
+                    borderWas[i] = parts[i].color;
+                }
+            }
+            for (int i = 0; i < parts.Length; i++)
+            {
+                parts[i].color = c == Color.white ? borderWas[i] : new Color(c.r, c.g, c.b, borderWas[i].a);
+            }
+        }
 
         public static void Frame(bool inGame, bool paused, bool mainMenuUp, bool loading)
         {
             Scene scene = SceneManager.GetActiveScene();
-            if (mainMenuUp && !loading && builtFor != scene && Time.unscaledTime - buttonTriedAt > 1f)
+            // (Back from QUIT MISSION in a party: tried every frame, the loading screen over it till then.)
+            if (mainMenuUp && !loading && builtFor != scene && (OpenOnMenu || Time.unscaledTime - buttonTriedAt > 1f))
             {
                 buttonTriedAt = Time.unscaledTime;
                 if (AddToMainMenu())
                 {
                     builtFor = scene;
+                    if (OpenOnMenu)
+                    {
+                        OpenOnMenu = false;
+                        if (SteamNet.InLobby)
+                        {
+                            Plugin.Log.LogInfo("party menu: back from a level in a party: the party screen");
+                            Show();
+                        }
+                        LoadingScreen.Hide();
+                    }
                 }
             }
             if (!Open)
@@ -89,7 +266,7 @@ namespace Killcraft
                 return;
             }
             var kb = UnityEngine.InputSystem.Keyboard.current;
-            if (kb != null && kb.escapeKey.wasPressedThisFrame && !Typing.Active && Typing.EndedFrame != Time.frameCount && !KillcraftPanel.Open && KillcraftPanel.ClosedFrame != Time.frameCount)
+            if (kb != null && kb.escapeKey.wasPressedThisFrame && !PartyWake.Active && !Typing.Active && Typing.EndedFrame != Time.frameCount && !KillcraftPanel.Open && KillcraftPanel.ClosedFrame != Time.frameCount)
             {
                 if (popup != null && popup.gameObject.activeSelf)
                 {
@@ -330,6 +507,7 @@ namespace Killcraft
 
         private static void Close()
         {
+            CommitMax();
             if (Typing.Owner == chatOwner || Typing.Owner == codeOwner || Typing.Owner == nameOwner)
             {
                 Typing.End();
@@ -398,6 +576,9 @@ namespace Killcraft
                 int n = i;
                 connect[i] = Ui.Button(v, labels[i], 32f, () => ConnectClicked(n), 30f, 228f + i * 83f, 570f, 72f, TextAlignmentOptions.MidlineLeft);
             }
+            // (Under REJOIN: why it didn't work, a while.)
+            rejoinNote = Ui.Text(v, "", 18f, Ui.Red, TextAlignmentOptions.TopLeft, 34f, 556f, 566f, 44f);
+            rejoinNote.enableWordWrapping = true;
 
             // The middle: the logo, KILLCRAFT, what's ready.
             // (On the screen's middle, whatever its shape: the start-up lines' block too, its width theirs.)
@@ -420,6 +601,7 @@ namespace Killcraft
             Ui.Text(h, "LOBBY NAME", 20f, Ui.Grey, TextAlignmentOptions.MidlineLeft, 2f, 4f, Wd, 28f);
             nameField = Ui.Field(h, 26f, () =>
             {
+                CommitMax();
                 if (Typing.Owner == nameOwner)
                 {
                     Typing.End();
@@ -430,10 +612,18 @@ namespace Killcraft
             Ui.Text(h, "MAX PLAYERS", 20f, Ui.Grey, TextAlignmentOptions.MidlineLeft, 2f, 116f, Wd, 28f);
             maxField = Ui.Field(h, 26f, () =>
             {
-                int m = ServerList.MaxPlayers + 1;
-                Plugin.PartyMax.Value = m > 10 ? 2 : m;
+                if (Typing.Owner == maxOwner)
+                {
+                    CommitMax();
+                    return;
+                }
+                if (Typing.Owner == nameOwner)
+                {
+                    Plugin.PartyTitle.Value = Typing.Text.Trim();
+                }
+                Typing.Begin(maxOwner, 2, SetMax);
             }, 0f, 148f, 176f, 58f);
-            Ui.Text(h, "CLICK TO CHANGE (2-10)", 16f, Ui.Grey, TextAlignmentOptions.MidlineLeft, 196f, 148f, 360f, 58f);
+            Ui.Text(h, "CLICK, TYPE 2-10, ENTER", 16f, Ui.Grey, TextAlignmentOptions.MidlineLeft, 196f, 148f, 360f, 58f);
             typeButton = Ui.Button(h, "", 32f, CyclePrivacy, 0f, 240f, Wd, 72f, TextAlignmentOptions.MidlineLeft);
             cheatsButton = Ui.Button(h, "", 32f, () => Plugin.PartyCheats.Value = !Plugin.PartyCheats.Value, 0f, 324f, Wd, 72f, TextAlignmentOptions.MidlineLeft);
             createButton = Ui.Button(h, "CREATE", 32f, Create, 0f, 444f, Wd, 72f);
@@ -625,12 +815,38 @@ namespace Killcraft
             {
                 Typing.End();
             }
+            if (n != 0)
+            {
+                CommitMax();
+            }
             refreshAt = 0f;
+        }
+
+        // MAX PLAYERS typed: its digits, 2 to 10 (anything else: as it was).
+        private static void SetMax(string typed)
+        {
+            string digits = new string(System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Where(typed ?? "", char.IsDigit)));
+            if (int.TryParse(digits, out int m) && digits.Length > 0)
+            {
+                Plugin.PartyMax.Value = Mathf.Clamp(m, 2, 10);
+            }
+        }
+
+        // (Typing in MAX PLAYERS and clicked elsewhere: what's typed counts, as Enter would.)
+        private static void CommitMax()
+        {
+            if (Typing.Owner == maxOwner)
+            {
+                string typed = Typing.Text;
+                Typing.End();
+                SetMax(typed);
+            }
         }
 
         // HOST PARTY's CREATE: the party, as set above it.
         private static void Create()
         {
+            CommitMax();
             if (Typing.Owner == nameOwner)
             {
                 Plugin.PartyTitle.Value = Typing.Text.Trim();
@@ -708,6 +924,11 @@ namespace Killcraft
         // ULTRAKILL's own level select (PLAY); the party follows once the host's in a level.
         private static void SelectLevel()
         {
+            // (Picked from here: the party's WAKE, unless it's PLAY ALONE.)
+            if (!Party.PlayAlone)
+            {
+                PartyWake.PickingForParty();
+            }
             Close();
             try
             {
@@ -766,6 +987,10 @@ namespace Killcraft
                 string placeholder = $"<color=#777777><i>{Typing.Escape(ServerList.Title)}</i></color>";
                 nameField.Set(Typing.Owner == nameOwner ? Typing.ShownIn(nameField.Text, "", "TYPE A NAME")
                     : string.IsNullOrWhiteSpace(Plugin.PartyTitle.Value) ? placeholder : Typing.Escape(Plugin.PartyTitle.Value.Trim()));
+            }
+            if (maxField != null)
+            {
+                maxField.Set(Typing.Owner == maxOwner ? Typing.ShownIn(maxField.Text, "", "2-10") : ServerList.MaxPlayers.ToString());
             }
             if (codeField != null)
             {
@@ -893,8 +1118,10 @@ namespace Killcraft
                 b.Interactable = known;
                 b.On = known && ((i == 0 && mode == Mode.Host) || (i == 1 && mode == Mode.Join) || (i == 2 && mode == Mode.Lobbies));
             }
-            connect[3].Set(hasLast ? "REJOIN: " + Typing.Escape(lastName.ToUpperInvariant()) : "REJOIN");
-            connect[3].Interactable = known && hasLast;
+            bool joining = ServerList.JoinPending;
+            connect[3].Set(joining ? "REJOINING..." : hasLast ? "REJOIN: " + Typing.Escape(lastName.ToUpperInvariant()) : "REJOIN");
+            connect[3].Interactable = known && hasLast && !joining;
+            rejoinNote.text = !joining && ServerList.JoinProblem.Length > 0 && Time.unscaledTime - ServerList.JoinProblemAt < 10f ? ServerList.JoinProblem : "";
             foreach (UiButton b in connect)
             {
                 b.Refresh();
@@ -907,7 +1134,6 @@ namespace Killcraft
             switch (mode)
             {
                 case Mode.Host:
-                    maxField.Set(ServerList.MaxPlayers.ToString());
                     typeButton.Set("TYPE: " + Privacy());
                     cheatsButton.Set("CHEATS: " + (Plugin.PartyCheats.Value ? "ON" : "OFF"));
                     createButton.Set(ServerList.Making ? "CREATING..." : "CREATE");
@@ -1072,17 +1298,19 @@ namespace Killcraft
             bool me = id == Room.MyId;
             var r = new MemberRow();
             r.Root = Ui.Row(squad, 96f);
-            Ui.Image(r.Root, null, new Color(0.42f, 0.42f, 0.42f, 1f), 0f, 93f, 620f, 3f);
-            r.Strip = Ui.Image(r.Root, null, Color.white, 2f, 16f, 6f, 70f);
-            Ui.Image(r.Root, null, new Color(0.12f, 0.12f, 0.12f, 1f), 22f, 18f, 66f, 66f);
-            RectTransform av = Ui.Rect(r.Root, "Avatar", 22f, 18f, 66f, 66f);
+            // (Lit red once this player's game has the wake.)
+            r.Glow = Ui.Image(r.Root, null, new Color(0f, 0f, 0f, 0f), 0f, 0f, 620f, 94f);
+            Ui.Image(r.Root, null, new Color(0.36f, 0.29f, 0.24f, 1f), 0f, 94f, 620f, 2f);
+            r.Strip = Ui.Image(r.Root, null, Color.white, 2f, 12f, 6f, 70f);
+            Ui.Image(r.Root, null, new Color(0.12f, 0.12f, 0.12f, 1f), 22f, 14f, 66f, 66f);
+            RectTransform av = Ui.Rect(r.Root, "Avatar", 22f, 14f, 66f, 66f);
             r.Avatar = av.gameObject.AddComponent<RawImage>();
             r.Avatar.raycastTarget = false;
             // (The host's crown on the picture's corner, inside the row.)
             r.Crown = Ui.Image(r.Root, Ui.Crown, Color.white, 8f, 6f, 30f, 22f);
             r.Crown.rectTransform.localEulerAngles = new Vector3(0f, 0f, 18f);
-            r.Name = Ui.Text(r.Root, "", 30f, Color.white, TextAlignmentOptions.MidlineLeft, 103f, 22f, 380f, 40f);
-            r.Status = Ui.Text(r.Root, "", 18f, new Color(0.78f, 0.78f, 0.78f), TextAlignmentOptions.MidlineLeft, 103f, 64f, 330f, 26f);
+            r.Name = Ui.Text(r.Root, "", 30f, Color.white, TextAlignmentOptions.MidlineLeft, 103f, 12f, 380f, 40f);
+            r.Status = Ui.Text(r.Root, "", 18f, new Color(0.62f, 0.62f, 0.62f), TextAlignmentOptions.MidlineLeft, 103f, 52f, 330f, 26f);
             r.Ping = Ui.Text(r.Root, "", 16f, Ui.Green, TextAlignmentOptions.MidlineRight, 440f, 14f, 162f, 26f);
             r.Bars = new Image[3];
             for (int i = 0; i < 3; i++)
@@ -1112,16 +1340,21 @@ namespace Killcraft
             r.Strip.color = i.Color;
             r.Avatar.texture = i.Avatar;
             r.Avatar.color = i.Avatar != null ? Color.white : new Color(0f, 0f, 0f, 0f);
-            r.Crown.gameObject.SetActive(host);
+            // (UltraLink's rows: no crown, the name white as the player wrote it.)
+            r.Crown.gameObject.SetActive(false);
             string name = me ? Profiles.Mine.SteamName : Profiles.NameOf(id);
-            r.Name.text = $"<color=#{Ui.Hex(i.Color)}>{Typing.Escape((name ?? "").ToUpperInvariant())}</color>";
+            r.Name.text = Typing.Escape(name ?? "");
             float nameW = Mathf.Min(r.Name.preferredWidth, 380f);
             for (int b = 0; b < r.Bars.Length; b++)
             {
-                r.Bars[b].rectTransform.anchoredPosition = new Vector2(103f + nameW + 18f + b * 7f, -42f);
+                r.Bars[b].rectTransform.anchoredPosition = new Vector2(103f + nameW + 18f + b * 7f, -32f);
             }
-            r.Status.text = StatusLine(i, me);
-            r.Ping.text = me ? "" : i.Ping >= 0f ? $"{Mathf.RoundToInt(i.Ping)} MS" : "";
+            bool waking = PartyWake.Active;
+            bool ok = waking && PartyWake.Ready(id);
+            r.Status.text = !waking ? StatusLine(i, me) : ok ? "<color=#FFFFFF>. . . OK</color>" : "WAIT FOR WAKE";
+            Color glow = ok ? new Color(0.4f, 0.18f, 0.125f, 1f) : new Color(0.4f, 0.18f, 0.125f, 0f);
+            r.Glow.color = Color.Lerp(r.Glow.color, glow, 0.5f);
+            r.Ping.text = "";
             r.Ping.color = i.Ping < 80f ? Ui.Green : i.Ping < 160f ? Ui.Yellow : Ui.Red;
             if (r.Watch != null)
             {

@@ -221,6 +221,7 @@ namespace Killcraft
             Toggle(mp, "Players bump into each other (the party host's)", () => PlayerCollision.On, PlayerCollision.Set);
             Toggle(mp, "Put back on solid ground after falling out of the map", Plugin.OutOfMapRescue);
             Toggle(mp, "Go where the party host goes", Plugin.FollowHost);
+            Toggle(mp, "Rejoin the party by itself after a drop or a crash", Plugin.AutoRejoin);
             Slider(mp, "Boss health per extra player", 0f, 2f, Plugin.BossHealthPerPlayer);
             Dropdown(mp, "Server list", new[] { "INVITE ONLY", "STEAM FRIENDS", "EVERYONE" },
                 () => Plugin.ListWorld.Value, v => Plugin.ListWorld.Value = v);
@@ -284,6 +285,10 @@ namespace Killcraft
             Toggle(mc, "Fresh Minecraft world each launch", Plugin.FreshWorld);
             Slider(mc, "TNT fuse (ticks)", 10, 80, Plugin.TntFuseTicks);
             Toggle(mc, "KILLCRAFT in the start-up check", Plugin.BootLine);
+            if (Plugin.MinecraftThere)
+            {
+                Toggle(mc, "Ask KILLNET or KILLCRAFT at start", Plugin.AskMode);
+            }
 
             model = ScriptableObject.CreateInstance<SettingsPage>();
             model.hideFlags = HideFlags.HideAndDontSave;

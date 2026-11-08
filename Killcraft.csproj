@@ -3,7 +3,7 @@
     <TargetFramework>netstandard2.1</TargetFramework>
     <AssemblyName>Killcraft</AssemblyName>
     <!-- The mod's version, in the dll too (the launcher reads it): keep it the same as Plugin.cs's BepInPlugin. -->
-    <Version>2.0.0</Version>
+    <Version>2.0.1</Version>
     <RootNamespace>Killcraft</RootNamespace>
     <LangVersion>latest</LangVersion>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
@@ -16,6 +16,12 @@
     <Managed>$(GameDir)\ULTRAKILL_Data\Managed</Managed>
     <PluginDir>$(GameDir)\BepInEx\plugins\Killcraft</PluginDir>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The launcher and the Minecraft mod are their own projects in this repo. -->
+    <Compile Remove="launcher/**;mcmod/**;design/**" />
+    <None Remove="launcher/**;mcmod/**;design/**" />
+  </ItemGroup>
 
   <ItemGroup>
     <Reference Include="BepInEx" HintPath="$(GameDir)\BepInEx\core\BepInEx.dll" Private="false" />

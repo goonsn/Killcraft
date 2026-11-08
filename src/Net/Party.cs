@@ -171,7 +171,7 @@ namespace Killcraft
                 ChatLines.Add($"{who} took the party to {LevelName(scene)} (you're not following: the party screen)");
                 return;
             }
-            if (!IsLevel(scene) || scene == SceneHelper.CurrentScene)
+            if (!IsLevel(scene) || scene == SceneHelper.CurrentScene || PartyWake.JustLoaded(scene))
             {
                 return;
             }
@@ -233,6 +233,10 @@ namespace Killcraft
 
         private static void Load(string scene) => LoadQuiet(scene);
 
+        // (The end of a wake: the party's going said the old way too, for players on a Killcraft from
+        // before wakes; those who had the wake are already on their way and pay it no mind.)
+        public static void SendGo(string scene) => KillNet.Send(Go, KillNet.ToServer, w => w.Write(scene));
+
         // A level loaded for this player only (following, spectating): not a trip for the party.
         public static void LoadQuiet(string scene)
         {
@@ -253,19 +257,30 @@ namespace Killcraft
 
         // The party host starting a level (ULTRAKILL's level select, its next level): everyone comes
         // (those in the menu, and those in the level the host was in). Not with PLAY ALONE.
+        // From the main menu with others in the party: a WAKE first (PartyWake), everyone loading together.
         [HarmonyPatch(typeof(SceneHelper), nameof(SceneHelper.LoadScene)), HarmonyPrefix]
-        private static void Starting(string sceneName)
+        private static bool Starting(string sceneName)
         {
             try
             {
                 if (quietLoad)
                 {
-                    return;
+                    return true;
                 }
                 bool alone = PlayAlone;
                 if (IsLevel(sceneName))
                 {
                     PlayAlone = false;
+                }
+                // (Picked through the party screen's SELECT LEVEL, hosting a party - even alone in it: the WAKE.
+                // A level opened the usual way goes at once, the party along as ever.)
+                if (!alone && PartyWake.ForParty && IsLevel(sceneName) && SceneHelper.CurrentScene == "Main Menu" && SteamNet.InLobby && IAmHost)
+                {
+                    if (!PartyWake.Active)
+                    {
+                        PartyWake.Begin(sceneName);
+                    }
+                    return false;
                 }
                 if (alone || !KillNet.Connected || !IAmHost || Members.Count < 2 || !IsLevel(sceneName) || sceneName == SceneHelper.CurrentScene)
                 {
@@ -273,7 +288,11 @@ namespace Killcraft
                     {
                         Plugin.Log.LogInfo($"party: playing {sceneName} alone");
                     }
-                    return;
+                    return true;
+                }
+                if (PartyWake.Active)
+                {
+                    return false;
                 }
                 Plugin.Log.LogInfo($"party: the party host started {sceneName}: taking everyone");
                 KillNet.Send(Go, KillNet.ToServer, w => w.Write(sceneName));
@@ -281,6 +300,17 @@ namespace Killcraft
             catch (Exception e)
             {
                 Plugin.Log.LogWarning($"party: couldn't take the party along ({e.Message})");
+            }
+            return true;
+        }
+
+        [HarmonyPatch(typeof(OptionsManager), nameof(OptionsManager.QuitMission)), HarmonyPrefix]
+        private static void QuittingMission()
+        {
+            if (SteamNet.InLobby)
+            {
+                // (Black from the main menu's first frame until the party screen's up: LoadingScreen.)
+                PartyMenu.OpenOnMenu = true;
             }
         }
 

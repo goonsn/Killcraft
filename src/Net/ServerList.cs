@@ -83,6 +83,25 @@ namespace Killcraft
         }
         public static bool InParty => party != null;
         public static bool Making => making != null;
+        public static bool JoinPending => joinTask != null && !joinTask.IsCompleted;
+
+        // Why the last join didn't work ("" if it did, or none yet), when; and whether it was because the
+        // party's gone (Steam deletes a lobby once the last one in it leaves).
+        public static string JoinProblem { get; private set; } = "";
+        public static float JoinProblemAt { get; private set; } = -100f;
+        public static bool LastJoinGone { get; private set; }
+
+        private static void Failed(string problem, bool gone, ulong id)
+        {
+            JoinProblem = problem;
+            JoinProblemAt = Time.unscaledTime;
+            LastJoinGone = gone;
+            // (Gone for good: REJOIN stops offering it.)
+            if (gone && LastParty(out ulong last, out string _) && last == id)
+            {
+                Plugin.LastParty.Value = "";
+            }
+        }
 
         public static bool PartyOwner
         {
@@ -154,6 +173,7 @@ namespace Killcraft
                 Collect();
                 CodeFound();
                 Joining();
+                Rejoin.Frame();
             }
             catch (Exception e)
             {
@@ -216,7 +236,7 @@ namespace Killcraft
             l.SetData("title", Clip(Title, 32));
             l.SetData("max", MaxPlayers.ToString());
             l.SetData("cheats", Plugin.PartyCheats.Value ? "1" : "0");
-            Entered(l);
+            Entered(l, Title);
             if (announced != code)
             {
                 announced = code;
@@ -248,12 +268,17 @@ namespace Killcraft
             madeAs = listAs;
         }
 
-        private static void Entered(Lobby l)
+        private static void Entered(Lobby l, string fallbackName)
         {
             party = l;
             shown = "";
             updatedAt = -100f;
             SteamNet.PartyChanged();
+            // (For REJOIN, and for Rejoin: back in it after a dropped connection or a crash.)
+            string title = l.GetData("title");
+            title = string.IsNullOrEmpty(title) ? fallbackName : Clip(title, 32);
+            Plugin.LastParty.Value = l.Id.Value + "|" + title.Replace("|", " ");
+            Plugin.PartyOpen.Value = true;
             // (Steam's "Join game" on this player in the friends list: the others' Killcraft joins.)
             try
             {
@@ -264,8 +289,14 @@ namespace Killcraft
             }
         }
 
-        public static void LeaveParty()
+        // (rejoining: left only to come straight back (Rejoin), so still "in" it should ULTRAKILL crash.)
+        public static void LeaveParty(bool rejoining = false)
         {
+            if (!rejoining)
+            {
+                Plugin.PartyOpen.Value = false;
+                Rejoin.Cancel();
+            }
             if (party == null)
             {
                 return;
@@ -709,7 +740,8 @@ namespace Killcraft
             return false;
         }
 
-        public static void JoinParty(ulong id, string from)
+        // (quiet: Rejoin's tries, which say themselves how they went.)
+        public static void JoinParty(ulong id, string from, bool quiet = false)
         {
             if (joinTask != null && !joinTask.IsCompleted)
             {
@@ -720,24 +752,37 @@ namespace Killcraft
                 return;
             }
             Plugin.Log.LogInfo($"server list: joining {from}'s party (Steam lobby {id})");
-            ChatLines.Add($"Joining {from}'s party...");
-            joinTask = JoinAsync(id, from);
+            JoinProblem = "";
+            LastJoinGone = false;
+            if (!quiet)
+            {
+                ChatLines.Add($"Joining {from}'s party...");
+            }
+            joinTask = JoinAsync(id, from, quiet);
         }
 
-        private static async Task JoinAsync(ulong id, string from)
+        private static async Task JoinAsync(ulong id, string from, bool quiet)
         {
             var lobby = new Lobby(id);
             RoomEnter entered = await lobby.Join();
             if (entered != RoomEnter.Success)
             {
                 Plugin.Log.LogWarning($"server list: couldn't get into {from}'s party ({entered})");
-                ChatLines.Add($"Couldn't join {from}'s party ({(entered == RoomEnter.Full ? "it's full" : "the invite's gone?")})");
+                Failed(entered == RoomEnter.DoesntExist ? "THAT PARTY IS GONE: NOBODY'S IN IT ANY MORE"
+                    : entered == RoomEnter.Full ? "THAT PARTY IS FULL"
+                    : entered == RoomEnter.Banned ? "YOU CAN'T JOIN THAT PARTY"
+                    : $"COULDN'T JOIN ({entered.ToString().ToUpperInvariant()})", entered == RoomEnter.DoesntExist, id);
+                if (!quiet)
+                {
+                    ChatLines.Add($"Couldn't join {from}'s party ({(entered == RoomEnter.Full ? "it's full" : "the invite's gone?")})");
+                }
                 return;
             }
             if (lobby.GetData(Key) != Version)
             {
                 lobby.Leave();
                 Plugin.Log.LogWarning($"server list: {from}'s party is from another Killcraft/KillNet version ({lobby.GetData(Key)})");
+                Failed("THAT PARTY RUNS ANOTHER VERSION", false, id);
                 ChatLines.Add($"{from}'s party runs another version of Killcraft/KillNet");
                 return;
             }
@@ -746,10 +791,7 @@ namespace Killcraft
             {
                 LeaveParty();
             }
-            Entered(lobby);
-            string title = lobby.GetData("title");
-            title = string.IsNullOrEmpty(title) ? "" : Clip(title, 32);
-            Plugin.LastParty.Value = id + "|" + (string.IsNullOrEmpty(title) ? from + "'s Lobby" : title).Replace("|", " ");
+            Entered(lobby, from + "'s Lobby");
             bool mc = lobby.GetData("mc") != "0";
             ChatLines.Add($"In {from}'s party" + (!mc && Plugin.WithMinecraft ? " (played without Minecraft)" : ""));
             Plugin.Log.LogInfo($"server list: in {from}'s party ({(mc ? "with" : "without")} Minecraft)");

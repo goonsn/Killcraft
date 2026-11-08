@@ -79,27 +79,45 @@ namespace Killcraft
             banner.gameObject.SetActive(false);
         }
 
+        // How far down each step right (the HUD's slant).
+        private const float Slant = 0.2f;
+
         private static Card MakeCard()
         {
             var c = new Card();
             c.Root = Ui.Rect(cards, "Card", 0f, 0f, 340f, 92f);
             c.Group = c.Root.gameObject.AddComponent<CanvasGroup>();
-            c.Root.localEulerAngles = new Vector3(0f, 0f, -3f);
-            // (Just around what's on it: the name and the health bar, and the status line under them
-            // only when there is one.)
-            c.Back = Ui.Image(c.Root, null, new Color(0f, 0f, 0f, 0.35f), 0f, 0f, 298f, 64f);
-            c.Bar = Ui.Image(c.Root, null, Color.white, 0f, 4f, 5f, 58f);
-            // (The host's crown sat on the name, over its first letters, as UltraLink's on the picture.)
-            c.Crown = Ui.Image(c.Root, Ui.Crown, Color.white, 6f, -17f, 28f, 21f);
-            c.Crown.rectTransform.localEulerAngles = new Vector3(0f, 0f, 18f);
+            // (Slanted as ULTRAKILL's own HUD sits: further right, further down - the bar and the writing,
+            // not the strip at its left, which stays upright. Nothing behind it.)
+            c.Back = Ui.Image(c.Root, null, new Color(0f, 0f, 0f, 0f), 0f, 0f, 298f, 64f);
+            c.Back.enabled = false;
+            c.Bar = Ui.Image(c.Root, null, Color.white, 0f, 2f, 4f, 60f);
+            // (The host's crown, gold, before the name.)
+            c.Crown = Ui.Image(c.Root, Ui.Crown, Ui.Yellow, 14f, 6f, 30f, 22f);
+            c.Crown.preserveAspect = true;
             c.Name = Ui.Text(c.Root, "", 28f, Color.white, TextAlignmentOptions.MidlineLeft, 14f, 0f, 284f, 32f);
-            c.HpBack = Ui.Image(c.Root, Ui.RoundFill, new Color(0.35f, 0.04f, 0.03f, 0.8f), 12f, 34f, 280f, 24f);
-            c.HpFill = Ui.Image(c.Root, Ui.RoundFill, Ui.Red, 12f, 34f, 280f, 24f);
-            c.Hp = Ui.Text(c.Root, "", 18f, Color.white, TextAlignmentOptions.MidlineLeft, 22f, 34f, 120f, 24f);
-            c.BarText = Ui.Text(c.Root, "", 18f, Color.white, TextAlignmentOptions.Center, 12f, 34f, 280f, 24f);
-            c.Skull = Ui.Image(c.Root, Ui.Skull, Ui.Cyan, 14f, 64f, 20f, 18f);
+            // (ULTRAKILL's health bar: its colour, as the player's colour settings have it.)
+            c.HpBack = Ui.Image(c.Root, Ui.RoundedFill, new Color(0f, 0f, 0f, 0.35f), 12f, 36f, 280f, 24f);
+            c.HpFill = Ui.Image(c.Root, Ui.RoundedFill, HealthColor(), 12f, 36f, 280f, 24f);
+            c.Hp = Ui.Text(c.Root, "", 18f, new Color(1f, 0.88f, 0.84f), TextAlignmentOptions.MidlineLeft, 20f, 36f, 120f, 24f);
+            c.BarText = Ui.Text(c.Root, "", 18f, Color.white, TextAlignmentOptions.Center, 12f, 36f, 280f, 24f);
+            c.Skull = Ui.Image(c.Root, Ui.Skull, Ui.Cyan, 14f, 66f, 20f, 18f);
             c.Skull.preserveAspect = true;
-            c.Status = Ui.Text(c.Root, "", 18f, Color.white, TextAlignmentOptions.MidlineLeft, 14f, 62f, 284f, 24f);
+            c.Status = Ui.Text(c.Root, "", 18f, Color.white, TextAlignmentOptions.MidlineLeft, 14f, 64f, 284f, 24f);
+            // (No box behind: a thin dark edge keeps the writing readable on a bright level.)
+            foreach (TextMeshProUGUI t in new[] { c.Name, c.Status, c.BarText })
+            {
+                t.outlineWidth = 0.18f;
+                t.outlineColor = new Color32(0, 0, 0, 200);
+            }
+            foreach (Image i in new[] { c.HpBack, c.HpFill, c.Skull })
+            {
+                i.gameObject.AddComponent<UiShear>().K = Slant;
+            }
+            foreach (TextMeshProUGUI t in new[] { c.Name, c.Hp, c.BarText, c.Status })
+            {
+                t.gameObject.AddComponent<UiShearText>().K = Slant;
+            }
             return c;
         }
 
@@ -136,22 +154,42 @@ namespace Killcraft
             }
         }
 
+        // ULTRAKILL's health bar colour (OPTIONS > colours), else its red.
+        private static Color HealthColor()
+        {
+            try
+            {
+                var cb = MonoSingleton.GetInstance(typeof(ColorBlindSettings)) as ColorBlindSettings;
+                if (cb != null && cb.healthBarColor.a > 0f)
+                {
+                    return cb.healthBarColor;
+                }
+            }
+            catch
+            {
+            }
+            return new Color(1f, 0f, 0f);
+        }
+
         private static void Fill(Card c, Party.Member m)
         {
             Profiles.Info i = Profiles.Of(m.Id);
             Color color = i.Color;
             c.Bar.color = color;
             c.Crown.gameObject.SetActive(m.PartyHost);
+            // (The name after the crown when there is one.)
+            ((RectTransform)c.Name.transform).offsetMin = new Vector2(m.PartyHost ? 50f : 14f, ((RectTransform)c.Name.transform).offsetMin.y);
             c.Name.text = Typing.Escape(Profiles.NameOf(m.Id));
             bool here = i.Fresh && i.Scene == SceneHelper.CurrentScene && i.State != Profiles.StateMenu;
             bool dead = here && i.State == Profiles.StateDead;
             bool done = i.Fresh && i.State == Profiles.StateDone;
-            c.Group.alpha = dead ? 0.5f : 1f;
-            c.Name.color = dead ? Ui.Grey : Color.white;
+            c.Group.alpha = 1f;
+            c.Name.color = dead ? new Color(1f, 1f, 1f, 0.22f) : Color.white;
             float hp = Mathf.Clamp01(i.Hp / 100f);
             c.HpFill.rectTransform.sizeDelta = new Vector2(Mathf.Max(24f, 280f * hp), 24f);
             c.HpFill.gameObject.SetActive(!dead && !done && hp > 0f && here);
-            c.HpBack.color = done ? Color.white : dead ? new Color(0.2f, 0.2f, 0.2f, 0.9f) : new Color(0.35f, 0.04f, 0.03f, 0.8f);
+            c.HpFill.color = HealthColor();
+            c.HpBack.color = done ? Color.white : dead ? new Color(0.05f, 0.05f, 0.05f, 0.85f) : new Color(0f, 0f, 0f, 0.35f);
             c.Hp.text = here && !dead && !done ? "+" + Mathf.Max(0, i.Hp) : "";
             c.BarText.text = done ? "<color=#000000>LEVEL COMPLETE</color>" : dead ? "<color=#E05040>DEAD</color>" : !here ? "<color=#AAAAAA>-</color>" : "";
             c.BarText.alignment = TextAlignmentOptions.Center;
@@ -209,7 +247,7 @@ namespace Killcraft
                 status = "";
             }
             c.Status.text = status;
-            c.Back.rectTransform.sizeDelta = new Vector2(298f, status.Length > 0 ? 88f : 64f);
+            c.Bar.rectTransform.sizeDelta = new Vector2(4f, status.Length > 0 ? 86f : 60f);
         }
 
         public static string Clock(float seconds)
@@ -360,6 +398,72 @@ namespace Killcraft
                     banner.pivot = anchor;
                     banner.anchoredPosition = done ? new Vector2(0f, 24f) : new Vector2(0f, -150f);
                     banner.localScale = done ? Vector3.one * 0.7f : Vector3.one;
+                }
+            }
+        }
+    }
+
+    // A slant on a picture's shape (the party HUD): each point moved down by K for each step right of
+    // the card's left edge (the picture's place on the card counted; the card unrotated).
+    internal sealed class UiShear : BaseMeshEffect
+    {
+        public float K;
+
+        public override void ModifyMesh(VertexHelper vh)
+        {
+            if (!IsActive())
+            {
+                return;
+            }
+            float off = transform.localPosition.x;
+            var v = default(UIVertex);
+            for (int i = 0; i < vh.currentVertCount; i++)
+            {
+                vh.PopulateUIVertex(ref v, i);
+                v.position.y -= K * (v.position.x + off);
+                vh.SetUIVertex(v, i);
+            }
+        }
+    }
+
+    // The same slant on TextMeshPro's writing (its letters made, then moved before they're drawn).
+    internal sealed class UiShearText : MonoBehaviour
+    {
+        public float K;
+        private TMP_Text text;
+
+        private void OnEnable()
+        {
+            text = GetComponent<TMP_Text>();
+            if (text != null)
+            {
+                text.OnPreRenderText += Slant;
+                text.SetVerticesDirty();
+            }
+        }
+
+        private void OnDisable()
+        {
+            if (text != null)
+            {
+                text.OnPreRenderText -= Slant;
+            }
+        }
+
+        private void Slant(TMP_TextInfo info)
+        {
+            float off = transform.localPosition.x;
+            for (int m = 0; m < info.meshInfo.Length; m++)
+            {
+                Vector3[] verts = info.meshInfo[m].vertices;
+                if (verts == null)
+                {
+                    continue;
+                }
+                int n = Mathf.Min(verts.Length, info.meshInfo[m].vertexCount);
+                for (int i = 0; i < n; i++)
+                {
+                    verts[i].y -= K * (verts[i].x + off);
                 }
             }
         }

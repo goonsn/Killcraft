@@ -22,8 +22,16 @@ namespace KillNetLauncher
 
         private readonly Settings settings = Settings.Load();
         private readonly bool forRender;
-        private readonly Bitmap bg, logo, figure;
-        private readonly Rectangle logoBox;
+        private readonly Bitmap bg, figure;
+        // KILLNET's logo (0) and KILLCRAFT's (1): which by MINECRAFT ON/OFF, as the mod names itself.
+        private readonly Bitmap[] logos = new Bitmap[2];
+        private readonly Rectangle[] logoBoxes = new Rectangle[2];
+        private int BrandIndex => settings.Minecraft ? 1 : 0;
+        private string BrandName => settings.Minecraft ? "KILLCRAFT" : "KILLNET";
+        private Bitmap logo => logos[BrandIndex];
+        private Rectangle logoBox => logoBoxes[BrandIndex];
+        private float brandAt = -100f;
+        private int brandFrom;
         private readonly Wires wires;
         private readonly PrivateFontCollection fonts = new PrivateFontCollection();
         private readonly Font big, small;
@@ -83,9 +91,11 @@ namespace KillNetLauncher
                 Icon = new Icon(s);
             }
             bg = LoadArt("bg.png");
-            logo = LoadArt("logo.png");
-            figure = LoadArt("figure.png");
-            logoBox = Opaque(logo);
+            logos[0] = LoadArt("logo.png");
+            logos[1] = LoadArt("logo-craft.png");
+            figure = LoadArt("figure-small.png");
+            logoBoxes[0] = Opaque(logos[0]);
+            logoBoxes[1] = Opaque(logos[1]);
             wires = new Wires(Res("wires.txt"), bg.Height);
             byte[] ttf;
             using (Stream s = Res("vcr.ttf"))
@@ -274,7 +284,7 @@ namespace KillNetLauncher
             mainButtons = new List<Btn>
             {
                 new Btn { R = Row(0), Label = () => "PLAY", Click = Play, Enabled = idle },
-                new Btn { R = Row(1), Label = () => "MINECRAFT: " + (settings.Minecraft ? "ON" : "OFF"), Click = ToggleMinecraft, Enabled = idle },
+                new Btn { R = Row(1), Label = () => "MINECRAFT: " + (settings.Minecraft ? "ON" : "OFF"), Click = ToggleMinecraft, Enabled = idle, Sound = Sfx.Glitch },
                 new Btn { R = LeftHalf(2), Label = () => "UPDATE", Click = () => _ = Update(false), Enabled = () => !busy && Installer.IsGame(settings.GamePath) },
                 new Btn { R = RightHalf(2), Label = () => "OPTIONS", Click = () => ShowScreen(true), Enabled = idle },
                 new Btn { R = Row(3), Label = () => "QUIT", Click = Close, Sound = null },
@@ -363,9 +373,9 @@ namespace KillNetLauncher
             }
             if (mod == null)
             {
-                return Installer.IsGame(settings.GamePath) ? "KILLNET NOT INSTALLED" : "KILLNET_" + LauncherVersion;
+                return Installer.IsGame(settings.GamePath) ? BrandName + " NOT INSTALLED" : BrandName + "_" + LauncherVersion;
             }
-            return mod.Length == 0 ? "KILLNET READY" : "KILLNET_" + mod + (UpdateWaiting ? " UPDATE " + latest.Version : " READY");
+            return mod.Length == 0 ? BrandName + " TEST BUILD" : BrandName + "_" + mod + (UpdateWaiting ? " UPDATE " + latest.Version : " READY");
         }
 
         private string[] Lines()
@@ -416,10 +426,12 @@ namespace KillNetLauncher
                 }
                 catch (Exception)
                 {
-                    Say(mod == null ? "OFFLINE - CAN'T DOWNLOAD KILLNET" : "OFFLINE - STANDBY");
+                    Say(mod == null ? "OFFLINE - CAN'T DOWNLOAD " + BrandName : "OFFLINE - STANDBY");
                     SetUpdate("OFFLINE", Red);
+                    notesOffline = true;
                     return;
                 }
+                SetNotes(latest.Notes);
                 if (LauncherUpdate && settings.AutoUpdate)
                 {
                     if (await SelfUpdate())
@@ -440,6 +452,11 @@ namespace KillNetLauncher
                 else if (UpdateWaiting)
                 {
                     Say(settings.AutoUpdate ? $"UPDATE {latest.Version} - INSTALLS ON PLAY" : $"UPDATE {latest.Version} - PRESS UPDATE");
+                    SetUpdate(latest.Version + " OUT", Color.White);
+                }
+                else if (mod.Length == 0)
+                {
+                    Say($"TEST BUILD - UPDATE FOR {latest.Version}");
                     SetUpdate(latest.Version + " OUT", Color.White);
                 }
                 else
@@ -580,20 +597,16 @@ namespace KillNetLauncher
                     }
                     busy = true;
                 }
-                // (A build of unknown version - a test build, put there by hand - may be newer than any
-                // release: UPDATE leaves it, REPAIR replaces it only when pressed twice.)
-                if (mod == "" && !force)
-                {
-                    Say("TEST BUILD INSTALLED - KEPT");
-                    return;
-                }
-                if (mod == "" && force && T - repairAskedAt > 6f)
+                SetNotes(latest.Notes);
+                // (A build of unknown version - a test build, put there by hand - may be newer than the
+                // release: UPDATE or REPAIR replaces it only when pressed twice.)
+                if (mod == "" && T - repairAskedAt > 6f)
                 {
                     repairAskedAt = T;
-                    Say($"REPAIR AGAIN TO PUT {latest.Version}");
+                    Say($"PRESS AGAIN TO INSTALL {latest.Version}");
                     return;
                 }
-                if (force || mod == null || UpdateWaiting || (settings.Minecraft && !hasMcParts))
+                if (force || string.IsNullOrEmpty(mod) || UpdateWaiting || (settings.Minecraft && !hasMcParts))
                 {
                     if (Installer.BepInExVersion(settings.GamePath) == null)
                     {
@@ -621,6 +634,9 @@ namespace KillNetLauncher
 
         private void ToggleMinecraft()
         {
+            // (The logo glitches from one name to the other.)
+            brandFrom = BrandIndex;
+            brandAt = T;
             settings.Minecraft = !settings.Minecraft;
             settings.Save();
             Say(settings.Minecraft
@@ -689,7 +705,16 @@ namespace KillNetLauncher
             return -1;
         }
 
-        private int LinkAt(Point page) => T < MenuAt + 0.6f ? -1 : githubR.Contains(page) ? 0 : discordR.Contains(page) ? 1 : -1;
+        private int LinkAt(Point page) => T < MenuAt + 0.6f ? -1 : githubR.Contains(page) ? 0 : discordR.Contains(page) ? 1 : notesLinkR.Contains(page) ? 2 : -1;
+
+        protected override void OnMouseWheel(MouseEventArgs e)
+        {
+            base.OnMouseWheel(e);
+            if (NewsR.Contains(Page(e.Location)))
+            {
+                notesScroll = Math.Max(0f, Math.Min(notesMax, notesScroll - e.Delta / 120f * 3f));
+            }
+        }
 
         private void Select(int i)
         {
@@ -761,7 +786,8 @@ namespace KillNetLauncher
                 if (link >= 0)
                 {
                     Sfx.Play(Sfx.Click);
-                    Installer.Open(link == 0 ? Installer.RepoUrl : Installer.DiscordUrl);
+                    Installer.Open(link == 0 ? Installer.RepoUrl : link == 1 ? Installer.DiscordUrl
+                        : latest != null && latest.Page.Length > 0 ? latest.Page : Installer.RepoUrl + "/releases");
                 }
             }
         }

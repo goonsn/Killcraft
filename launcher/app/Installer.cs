@@ -30,6 +30,7 @@ namespace KillNetLauncher
             public string NetUrl, NetName;        // KillNet-<v>.zip: multiplayer only (smaller)
             public long FullSize, NetSize;
             public string LauncherVersion, LauncherUrl;  // KillNet-Launcher-<v>.exe, the newest in any release
+            public string Notes = "", Page = "";          // its notes (GitHub's markdown) and its page
         }
 
         public const string DiscordUrl = "https://discord.gg/UZsPDRvnGJ";
@@ -125,18 +126,26 @@ namespace KillNetLauncher
 
         private static string ModFolder(string game) => Path.Combine(game, "BepInEx", "plugins", "Killcraft");
 
-        // The installed mod's version ("" if installed some other way, null if not installed).
+        // The installed mod's version: what the launcher installed (version.txt), else the dll's own (from
+        // 2.0.1 on it carries it); "" if neither says (a test build), null if not installed.
         public static string ModVersion(string game)
         {
             string folder = ModFolder(game);
-            if (!File.Exists(Path.Combine(folder, "Killcraft.dll")))
+            string dll = Path.Combine(folder, "Killcraft.dll");
+            if (!File.Exists(dll))
             {
                 return null;
             }
             try
             {
                 string f = Path.Combine(folder, "version.txt");
-                return File.Exists(f) ? File.ReadAllText(f).Trim() : "";
+                if (File.Exists(f))
+                {
+                    return File.ReadAllText(f).Trim();
+                }
+                string v = FileVersionInfo.GetVersionInfo(dll).ProductVersion ?? "";
+                v = Regex.Match(v, @"^\d+\.\d+\.\d+").Value;
+                return v.Length == 0 || v == "1.0.0" || v == "0.0.0" ? "" : v;
             }
             catch (Exception)
             {
@@ -174,7 +183,7 @@ namespace KillNetLauncher
                 {
                     continue;
                 }
-                var here = new Release { Tag = r["tag_name"] as string ?? "" };
+                var here = new Release { Tag = r["tag_name"] as string ?? "", Notes = r["body"] as string ?? "", Page = r["html_url"] as string ?? "" };
                 here.Version = here.Tag.TrimStart('v', 'V');
                 string lv = null, lu = null;
                 foreach (Dictionary<string, object> a in assets)

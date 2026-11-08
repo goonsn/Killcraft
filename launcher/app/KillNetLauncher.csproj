@@ -9,7 +9,7 @@
     <LangVersion>latest</LangVersion>
     <AssemblyName>KillNet</AssemblyName>
     <RootNamespace>KillNetLauncher</RootNamespace>
-    <Version>1.0.2</Version>
+    <Version>1.0.3</Version>
     <Product>KillNet</Product>
     <Company>goonsn</Company>
     <Copyright>KillNet</Copyright>
@@ -28,7 +28,8 @@
   <ItemGroup>
     <EmbeddedResource Include="Art\bg.png" LogicalName="bg.png" />
     <EmbeddedResource Include="Art\logo.png" LogicalName="logo.png" />
-    <EmbeddedResource Include="Art\figure.png" LogicalName="figure.png" />
+    <EmbeddedResource Include="Art\logo-craft.png" LogicalName="logo-craft.png" />
+    <EmbeddedResource Include="Art\figure-small.png" LogicalName="figure-small.png" />
     <EmbeddedResource Include="Art\wires.txt" LogicalName="wires.txt" />
     <EmbeddedResource Include="Art\icon.ico" LogicalName="icon.ico" />
     <EmbeddedResource Include="..\design\fonts\VCR_OSD_Replayed.ttf" LogicalName="vcr.ttf" />

@@ -56,7 +56,9 @@ namespace KillNetLauncher
         // ---- the layers, scaled to the window (made again when its size changes) ----
 
         private Size scaledFor;
-        private Bitmap bgS, logoS, figureS, overS, back;
+        private Bitmap bgS, figureS, overS, back;
+        private readonly Bitmap[] logosS = new Bitmap[2];
+        private Bitmap logoS => logosS[BrandIndex];
 
         private void Scale(int cw, int ch)
         {
@@ -66,12 +68,14 @@ namespace KillNetLauncher
             }
             scaledFor = new Size(cw, ch);
             bgS?.Dispose();
-            logoS?.Dispose();
+            logosS[0]?.Dispose();
+            logosS[1]?.Dispose();
             figureS?.Dispose();
             overS?.Dispose();
             float s = cw / (float)W;
             bgS = Scaled(bg, cw, Math.Max(1, (int)Math.Round(bg.Height * s)));
-            logoS = Scaled(logo, cw, ch);
+            logosS[0] = Scaled(logos[0], cw, ch);
+            logosS[1] = Scaled(logos[1], cw, ch);
             figureS = Scaled(figure, cw, ch);
             // Over everything: scanlines (every third row a little darker), the frame (black outside its
             // rounded corners, a white line).
@@ -368,7 +372,7 @@ namespace KillNetLauncher
             }
             else
             {
-                g.DrawImageUnscaled(logoS, dx, dy);
+                DrawLogo(g, cw, s, dx, dy);
             }
             if (c >= 0.24f && c < 0.36f)
             {
@@ -427,7 +431,7 @@ namespace KillNetLauncher
                 case 1:
                     return ("BEPINEX", bepinex != null ? Short(bepinex) : found ? "NOT INSTALLED" : "-", bepinex != null ? Color.White : Dim);
                 case 2:
-                    return ("KILLNET", mod == null ? "NOT INSTALLED" : mod.Length == 0 ? "TEST BUILD" : mod, mod == null ? Dim : Color.White);
+                    return (BrandName, mod == null ? "NOT INSTALLED" : mod.Length == 0 ? "TEST BUILD" : mod, mod == null ? Dim : Color.White);
                 case 3:
                     return ("MINECRAFT", settings.Minecraft ? (hasMcParts || mod == null ? "ON" : "ON - NOT DOWNLOADED") : "OFF", Color.White);
                 case 4:
@@ -644,11 +648,220 @@ namespace KillNetLauncher
                 Rectangle r = linkHover == 0 ? githubR : discordR;
                 g.FillRectangle(Brushes.White, r.X, r.Bottom + 1, r.Width, 3);
             }
+            DrawNews(g, t);
             string ver = "LAUNCHER " + LauncherVersion;
             Term(g, ver, W - 130 - Measure(g, ver, small).Width, H - 82, Dim, linkFrom + 0.45f, 80f);
         }
 
         private float prevDraw = -1f;
+
+        // The logo, still; or (MINECRAFT just switched) glitching from one name to the other: bands of the
+        // old one jumping sideways more and more, then the new one's settling.
+        private void DrawLogo(Graphics g, int cw, float s, int dx, int dy)
+        {
+            float b = T - brandAt;
+            if (b >= 0.34f || (fixedTime >= 0f && !fixedSwitch))
+            {
+                g.DrawImageUnscaled(logoS, dx, dy);
+                return;
+            }
+            int from = b < 0.17f ? brandFrom : BrandIndex;
+            float amt = b < 0.17f ? b / 0.17f : 1f - (b - 0.17f) / 0.17f;
+            Rectangle a = logoBoxes[0], c = logoBoxes[1];
+            int top = (int)((Math.Min(a.Y, c.Y) - 8) * s), bottom = (int)((Math.Max(a.Bottom, c.Bottom) + 8) * s), bands = 9;
+            var rnd = new Random((int)(b / 0.03f) * 7919 + 101);
+            for (int i = 0; i < bands; i++)
+            {
+                int y0 = top + (bottom - top) * i / bands, y1 = top + (bottom - top) * (i + 1) / bands;
+                if (rnd.NextDouble() < 0.18 * amt)
+                {
+                    continue;  // (a band gone for a moment)
+                }
+                int ox = (int)((rnd.NextDouble() * 2 - 1) * 70 * s * amt);
+                g.DrawImage(logosS[from], new Rectangle(dx + ox, dy + y0, cw, y1 - y0), new Rectangle(0, y0, cw, y1 - y0), GraphicsUnit.Pixel);
+            }
+        }
+
+        // ---- the patch notes (the newest release's notes from GitHub), on the right under the figure ----
+
+        private static readonly Rectangle NewsR = new Rectangle(1160, 628, 632, 352);
+        private Font tiny;
+        private List<(string Text, int Kind)> notes;  // (0 heading, 1 bullet, 2 text, 3 blank)
+        private List<(string Text, int Kind, bool More)> notesWrapped;
+        private bool notesOffline;
+        private float notesAt = -100f, notesScroll, notesMax;
+        private Rectangle notesLinkR;
+
+        // GitHub's markdown, as lines: headings, bullets, text (bold, code and links plain; Downloads left out).
+        private void SetNotes(string md)
+        {
+            var list = new List<(string, int)>();
+            bool skip = false;
+            foreach (string raw in (md ?? "").Replace("\r", "").Split('\n'))
+            {
+                string line = raw.Trim();
+                line = System.Text.RegularExpressions.Regex.Replace(line, @"\[([^\]]*)\]\([^)]*\)", "$1");
+                line = line.Replace("**", "").Replace("`", "").Replace("__", "");
+                if (line.StartsWith("#"))
+                {
+                    string head = line.TrimStart('#').Trim();
+                    skip = head.StartsWith("Download", StringComparison.OrdinalIgnoreCase);
+                    if (skip || head.Length == 0)
+                    {
+                        continue;
+                    }
+                    if (list.Count > 0 && list[list.Count - 1].Item2 != 3)
+                    {
+                        list.Add(("", 3));
+                    }
+                    list.Add((head.ToUpperInvariant(), 0));
+                }
+                else if (skip)
+                {
+                    continue;
+                }
+                else if (line.StartsWith("- ") || line.StartsWith("* "))
+                {
+                    list.Add((line.Substring(2).Trim().ToUpperInvariant(), 1));
+                }
+                else if (line.Length > 0)
+                {
+                    list.Add((line.ToUpperInvariant(), 2));
+                }
+                else if (list.Count > 0 && list[list.Count - 1].Item2 != 3)
+                {
+                    list.Add(("", 3));
+                }
+            }
+            while (list.Count > 0 && list[list.Count - 1].Item2 == 3)
+            {
+                list.RemoveAt(list.Count - 1);
+            }
+            notes = list;
+            notesWrapped = null;
+            notesScroll = 0f;
+            if (notesAt < 0f)
+            {
+                notesAt = T;
+            }
+        }
+
+        private List<(string, int, bool)> Wrap(Graphics g, float width)
+        {
+            var o = new List<(string, int, bool)>();
+            foreach (var (text, kind) in notes)
+            {
+                if (kind == 3)
+                {
+                    o.Add(("", 3, false));
+                    continue;
+                }
+                string lead = kind == 1 ? "- " : "";
+                string line = "";
+                bool more = false;
+                foreach (string word in text.Split(' '))
+                {
+                    string next = line.Length == 0 ? word : line + " " + word;
+                    if (line.Length > 0 && Measure(g, lead + next, tiny).Width > width)
+                    {
+                        o.Add((lead + line, kind, more));
+                        lead = kind == 1 ? "  " : "";
+                        more = true;
+                        line = word;
+                    }
+                    else
+                    {
+                        line = next;
+                    }
+                }
+                o.Add((lead + line, kind, more));
+            }
+            return o;
+        }
+
+        private void DrawNews(Graphics g, float t)
+        {
+            if (tiny == null)
+            {
+                tiny = new Font(fonts.Families[0], 21f, FontStyle.Regular, GraphicsUnit.Pixel);
+            }
+            float appear = Ease((t - MenuAt - 0.15f) / 0.45f);
+            if (appear <= 0f)
+            {
+                return;
+            }
+            // (Sliding in from the right as the buttons come from the left.)
+            var r = new RectangleF(NewsR.X + (W - NewsR.X + 60) * (1f - appear), NewsR.Y, NewsR.Width, NewsR.Height);
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            using (GraphicsPath box = Chamfer(r, 14))
+            using (var fill = new SolidBrush(Color.FromArgb(225, 0, 0, 0)))
+            using (var pen = new Pen(Color.White, 3))
+            {
+                g.FillPath(fill, box);
+                g.DrawPath(pen, box);
+            }
+            string title = latest != null ? "-- PATCH NOTES " + latest.Version + " --" : "-- PATCH NOTES --";
+            SizeF ts = Measure(g, title, small);
+            Text(g, title, r.X + (r.Width - ts.Width) / 2f, r.Y + 14, Color.White);
+            g.FillRectangle(Brushes.White, r.X + 18, r.Y + 52, r.Width - 36, 2);
+
+            var body = new RectangleF(r.X + 22, r.Y + 66, r.Width - 56, r.Height - 66 - 46);
+            const float LineH = 27f;
+            if (notes == null || notes.Count == 0)
+            {
+                string msg = notesOffline ? "NO SIGNAL - OFFLINE" : notes != null ? "NO NOTES FOR THIS ONE" : "RECEIVING" + new string('.', 1 + (int)(t * 3f) % 3);
+                Text(g, msg, body.X, body.Y, Dim, tiny);
+            }
+            else
+            {
+                if (notesWrapped == null)
+                {
+                    notesWrapped = Wrap(g, body.Width);
+                }
+                int visible = (int)(body.Height / LineH);
+                notesMax = Math.Max(0, notesWrapped.Count - visible);
+                notesScroll = Math.Min(notesScroll, notesMax);
+                int first = (int)notesScroll;
+                // (Each line appearing a moment after the last, the first time.)
+                float from = Math.Max(MenuAt + 0.5f, notesAt + 0.1f);
+                GraphicsState st = g.Save();
+                g.SetClip(body, CombineMode.Intersect);
+                for (int i = first; i < notesWrapped.Count && i < first + visible + 1; i++)
+                {
+                    if (t < from + i * 0.03f)
+                    {
+                        break;
+                    }
+                    var (text, kind, _) = notesWrapped[i];
+                    if (kind == 3)
+                    {
+                        continue;
+                    }
+                    Text(g, text, body.X, body.Y + (i - first) * LineH, kind == 0 ? Color.White : Ink, tiny);
+                }
+                g.Restore(st);
+                // (A bar when there's more than shows: the mouse wheel scrolls.)
+                if (notesMax > 0)
+                {
+                    float trackX = r.Right - 20, trackH = body.Height;
+                    using (var faint = new SolidBrush(Faint))
+                    {
+                        g.FillRectangle(faint, trackX, body.Y, 4, trackH);
+                    }
+                    float thumbH = Math.Max(24f, trackH * visible / notesWrapped.Count);
+                    float thumbY = body.Y + (trackH - thumbH) * (notesScroll / notesMax);
+                    g.FillRectangle(Brushes.White, trackX, thumbY, 4, thumbH);
+                }
+            }
+            string link = "OPEN ON GITHUB";
+            SizeF ls = Measure(g, link, tiny);
+            notesLinkR = appear >= 1f ? new Rectangle((int)(r.X + 22), (int)(r.Bottom - 36), (int)ls.Width, (int)ls.Height) : Rectangle.Empty;
+            Text(g, link, r.X + 22, r.Bottom - 36, linkHover == 2 ? Color.White : Dim, tiny);
+            if (linkHover == 2)
+            {
+                g.FillRectangle(Brushes.White, r.X + 22, r.Bottom - 36 + ls.Height + 1, ls.Width, 2);
+            }
+        }
 
         // A button: white outline, black inside; hovered, filled white (the label black); pressed, red.
         private void DrawButton(Graphics g, Btn b, float dx, bool down)
@@ -718,6 +931,23 @@ namespace KillNetLauncher
             {
                 closingAt = at - 0.12f;
             }
+            else if (screen == "craft")
+            {
+                settings.Minecraft = true;
+            }
+            else if (screen == "switch")
+            {
+                brandFrom = 0;
+                settings.Minecraft = true;
+                brandAt = at - 0.1f;
+                fixedSwitch = true;
+            }
+            if (screen != "nonotes")
+            {
+                latest = new Installer.Release { Version = "2.0.0", Notes = SampleNotes };
+                SetNotes(SampleNotes);
+                notesAt = 0f;
+            }
             using (var page = new Bitmap(W, H, PixelFormat.Format32bppPArgb))
             {
                 using (Graphics g = Graphics.FromImage(page))
@@ -727,6 +957,9 @@ namespace KillNetLauncher
                 page.Save(file);
             }
         }
+
+        private bool fixedSwitch;
+        private const string SampleNotes = "# Killcraft 2.0.0: multiplayer\n\n**Play ULTRAKILL together over Steam**, with or without Minecraft.\n\n## New\n- **Parties:** PARTY in the main menu. HOST PARTY (name, size, public / friends / private, cheats on or off), JOIN BY CODE, PUBLIC LOBBIES, REJOIN, or a Steam invite.\n- **One level for everyone:** shared enemies and bosses (one health bar), doors, arenas, breakables, Cybergrind waves.\n- **Voice chat** (push to talk: V) heard from where each V1 is, **text chat** (Enter).\n- **Replays:** every run is kept, with a CASE FILE.\n\n## Downloads\n- `Killcraft-2.0.0.zip`\n";
 
         // How long a frame takes to draw at that size (milliseconds, on average), for --bench.
         public double Bench(int cw, int ch, int frames)

@@ -36,7 +36,7 @@ def layer(mask, x, y, halo):
     page.paste((255, 255, 255, 255), (x, y), mask)
     return page
 
-# ---- the logo: KILLNET, drawn on a coarse grid (3 px a cell) like ULTRAKILL's ----
+# ---- the logos: KILLNET and KILLCRAFT, drawn on a coarse grid (3 px a cell) like ULTRAKILL's ----
 U, LH, S = 3, 48, 13
 def checker(m, poly):
     k = Image.new("L", m.size, 0); ImageDraw.Draw(k).polygon(poly, fill=255)
@@ -44,37 +44,51 @@ def checker(m, poly):
     for y in range(m.height):
         for x in range(m.width):
             if kp[x, y] and (x + y) % 2 == 0: mp[x, y] = 255
-def letter(w, solids, cracks=(), dithers=(), outlines=(), dots=()):
+def letter(w, solids, cracks=(), dithers=(), outlines=(), dots=(), holes=()):
     m = Image.new("L", (w + 12, LH + 1), 0)
     md = ImageDraw.Draw(m)
     for p in solids: md.polygon(p, fill=255)
+    for p in holes: md.polygon(p, fill=0)
     for p in dithers: checker(m, p)
     for p in outlines: md.polygon(p, outline=255)
     for a, b in cracks: md.line([a, b], fill=0, width=1)
     for x, y in dots: md.rectangle([x, y, x + 1, y + 1], fill=0)
     return m, w
-letters = [
-    letter(40, [[(0,0),(S,0),(S,LH),(0,LH)], [(S+1,20),(27,0),(40,0),(S+1,38)], [(22,27),(29,22),(40,40),(40,LH),(33,LH)]],
-           cracks=[((S+1,20),(S+1,38)), ((20,30),(30,20))], dithers=[[(18,30),(22,27),(33,LH),(28,LH)]], dots=[(5,14),(5,32)]),
-    letter(S, [[(0,0),(S,0),(S,LH),(0,LH)]]),
-    letter(32, [[(0,0),(S,0),(S,35),(0,35)], [(0,35),(27,35),(32,40),(32,LH),(0,LH)]], cracks=[((0,35),(S,35))]),
-    letter(34, [[(0,0),(S,0),(S,LH),(0,LH)], [(S,35),(22,35),(34,LH),(S,LH)]],
-           outlines=[[(25,35),(30,35),(44,LH),(38,LH)]], dithers=[[(27,37),(29,37),(41,LH-1),(39,LH-1)]]),
-    letter(42, [[(0,0),(S,0),(S,LH),(0,LH)], [(29,0),(42,0),(42,LH),(29,LH)], [(S+1,0),(21,0),(28,30),(28,LH),(21,LH),(S+1,18)]],
-           cracks=[((S+1,0),(S+1,18)), ((28,30),(28,LH))], dithers=[[(S+1,20),(S+3,20),(21,LH),(19,LH)]]),
-    letter(32, [[(0,0),(S,0),(S,LH),(0,LH)], [(S,0),(32,0),(27,11),(S,11)], [(S,18),(27,18),(23,29),(S,29)], [(S,36),(28,36),(32,40),(32,LH),(S,LH)]],
-           cracks=[((S,0),(S,11)), ((S,36),(S,LH))]),
-    letter(40, [[(5,0),(40,0),(40,12),(0,12)], [(14,12),(27,12),(27,LH),(14,LH)]], cracks=[((14,12),(21,0))]),
-]
-total = sum(w for _, w in letters) + 5 * len(letters)
-logo = Image.new("L", (total + 16, LH + 3), 0)
-x = 0
-for m, w in letters:
-    logo.paste(255, (x, 0), m)
-    x += w + 5
-logo = logo.resize((logo.width * U, logo.height * U), Image.NEAREST)
-layer(logo, 128, 100, 9).save(os.path.join(out, "logo.png"), optimize=True)
-print("logo bottom", 100 + logo.height)
+L = {
+    "K": letter(40, [[(0,0),(S,0),(S,LH),(0,LH)], [(S+1,20),(27,0),(40,0),(S+1,38)], [(22,27),(29,22),(40,40),(40,LH),(33,LH)]],
+                cracks=[((S+1,20),(S+1,38)), ((20,30),(30,20))], dithers=[[(18,30),(22,27),(33,LH),(28,LH)]], dots=[(5,14),(5,32)]),
+    "I": letter(S, [[(0,0),(S,0),(S,LH),(0,LH)]]),
+    "L1": letter(32, [[(0,0),(S,0),(S,35),(0,35)], [(0,35),(27,35),(32,40),(32,LH),(0,LH)]], cracks=[((0,35),(S,35))]),
+    "L2": letter(34, [[(0,0),(S,0),(S,LH),(0,LH)], [(S,35),(22,35),(34,LH),(S,LH)]],
+                 outlines=[[(25,35),(30,35),(44,LH),(38,LH)]], dithers=[[(27,37),(29,37),(41,LH-1),(39,LH-1)]]),
+    "N": letter(42, [[(0,0),(S,0),(S,LH),(0,LH)], [(29,0),(42,0),(42,LH),(29,LH)], [(S+1,0),(21,0),(28,30),(28,LH),(21,LH),(S+1,18)]],
+                cracks=[((S+1,0),(S+1,18)), ((28,30),(28,LH))], dithers=[[(S+1,20),(S+3,20),(21,LH),(19,LH)]]),
+    "E": letter(32, [[(0,0),(S,0),(S,LH),(0,LH)], [(S,0),(32,0),(27,11),(S,11)], [(S,18),(27,18),(23,29),(S,29)], [(S,36),(28,36),(32,40),(32,LH),(S,LH)]],
+                cracks=[((S,0),(S,11)), ((S,36),(S,LH))]),
+    "T": letter(40, [[(5,0),(40,0),(40,12),(0,12)], [(14,12),(27,12),(27,LH),(14,LH)]], cracks=[((14,12),(21,0))]),
+    # (KILLCRAFT's own: the same stems, cut corners, cracks and dithered diagonals)
+    "C": letter(34, [[(5,0),(34,0),(34,12),(S,12),(S,36),(34,36),(34,LH),(5,LH),(0,43),(0,5)]],
+                cracks=[((0,24),(S,30)), ((S,36),(S+7,LH))], dithers=[[(22,36),(26,36),(34,44),(34,47)]], dots=[(5,14)]),
+    "R": letter(36, [[(0,0),(S,0),(S,LH),(0,LH)], [(S,0),(31,0),(36,5),(36,22),(31,27),(S,27)], [(S+5,27),(25,27),(36,LH),(29,LH)]],
+                holes=[[(S,11),(24,11),(24,17),(S,17)]], cracks=[((S,0),(S,11)), ((25,30),(30,27))], dithers=[[(S+1,29),(S+5,29),(25,LH),(21,LH)]]),
+    "A": letter(38, [[(11,0),(27,0),(38,LH),(25,LH),(23,38),(15,38),(13,LH),(0,LH)]],
+                holes=[[(16,14),(22,14),(23,28),(15,28)]], cracks=[((19,0),(19,14))], dithers=[[(1,46),(4,40),(6,40),(3,46)]], dots=[(30,32)]),
+    "F": letter(32, [[(0,0),(S,0),(S,LH),(0,LH)], [(S,0),(32,0),(27,11),(S,11)], [(S,18),(27,18),(23,29),(S,29)]],
+                cracks=[((S,0),(S,11)), ((0,40),(S,44))], dots=[(5,30)]),
+}
+def make_logo(seq, name):
+    letters = [L[c] for c in seq]
+    total = sum(w for _, w in letters) + 5 * len(letters)
+    logo = Image.new("L", (total + 16, LH + 3), 0)
+    x = 0
+    for m, w in letters:
+        logo.paste(255, (x, 0), m)
+        x += w + 5
+    logo = logo.resize((logo.width * U, logo.height * U), Image.NEAREST)
+    layer(logo, 128, 100, 9).save(os.path.join(out, name), optimize=True)
+    print(name, "right edge", 128 + logo.width, "bottom", 100 + logo.height)
+make_logo(["K", "I", "L1", "L2", "N", "E", "T"], "logo.png")
+make_logo(["K", "I", "L1", "L2", "C", "R", "A", "F", "T"], "logo-craft.png")
 
 # ---- the figure: an exploded block, its pieces spread like V1's wings ----
 fig = Image.new("L", (300, 330), 0)
@@ -105,6 +119,12 @@ for px_, py_, s in parts: cube(px_, py_, s)
 cube(cx, cy, 42)
 for j, s in enumerate((19, 18, 17)):
     cube(cx, cy + 74 + j * 40, s)
+small = fig.resize((fig.width * 2, fig.height * 2), Image.NEAREST)
 fig = fig.resize((fig.width * 8 // 3, fig.height * 8 // 3), Image.NEAREST)
 layer(fig, 1090, 110, 7).save(os.path.join(out, "figure.png"), optimize=True)
+# (Smaller, up in the right corner: the patch notes panel under it.)
+bx = small.getbbox()
+fx, fy = 1476 - (bx[0] + bx[2]) // 2, 62 - bx[1]
+layer(small, fx, fy, 5).save(os.path.join(out, "figure-small.png"), optimize=True)
+print("figure-small", fx + bx[0], fy + bx[1], fx + bx[2], fy + bx[3])
 print("ok")

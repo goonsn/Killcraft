@@ -29,6 +29,7 @@ namespace KillNetLauncher
         public static readonly byte[] PowerOn = Make(0.32, (t, p) => (Noise() * 0.5 * Env(p, 0.001, 14) + Math.Sin(2 * Math.PI * (60 + 3000 * p * p) * t) * 0.3 * Env(p, 0.01, 3)) * 0.7);
         public static readonly byte[] PowerOff = Make(0.3, (t, p) => Math.Sin(2 * Math.PI * (2400 - 2300 * Math.Sqrt(p)) * t) * 0.22 * (1 - p) + Noise() * 0.12 * Env(p, 0.001, 10));
         public static readonly byte[] Slam = Make(0.55, (t, p) => (Math.Sin(2 * Math.PI * (90 - 50 * p) * t) * 0.9 + Noise() * Env(p, 0.001, 18) * 0.8) * Env(p, 0.002, 5) * 0.75);
+        public static readonly byte[] Glitch = Make(0.24, (t, p) => (Noise() * (((int)(p * 16)) % 2 == 0 ? 0.55 : 0.12) + Square(p < 0.5 ? 330 : 990, t) * 0.25) * Env(p, 0.001, 2.5) * 0.55);
         public static readonly byte[] Error = Make(0.2, (t, p) => Square(p < 0.5 ? 220 : 165, t) * Env(p, 0.002, 2) * 0.2);
 
         public static void Play(byte[] wav)

@@ -56,7 +56,8 @@ namespace KillNetLauncher
         // ---- the layers, scaled to the window (made again when its size changes) ----
 
         private Size scaledFor;
-        private Bitmap bgS, figureS, overS, back;
+        private Bitmap bgS, overS, back;
+        private readonly Bitmap[] figuresS = new Bitmap[2];
         private readonly Bitmap[] logosS = new Bitmap[2];
         private Bitmap logoS => logosS[BrandIndex];
 
@@ -70,13 +71,15 @@ namespace KillNetLauncher
             bgS?.Dispose();
             logosS[0]?.Dispose();
             logosS[1]?.Dispose();
-            figureS?.Dispose();
+            figuresS[0]?.Dispose();
+            figuresS[1]?.Dispose();
             overS?.Dispose();
             float s = cw / (float)W;
             bgS = Scaled(bg, cw, Math.Max(1, (int)Math.Round(bg.Height * s)));
             logosS[0] = Scaled(logos[0], cw, ch);
             logosS[1] = Scaled(logos[1], cw, ch);
-            figureS = Scaled(figure, cw, ch);
+            figuresS[0] = Scaled(figures[0], cw, ch);
+            figuresS[1] = Scaled(figures[1], cw, ch);
             // Over everything: scanlines (every third row a little darker), the frame (black outside its
             // rounded corners, a white line).
             overS = new Bitmap(cw, ch, PixelFormat.Format32bppPArgb);
@@ -335,7 +338,7 @@ namespace KillNetLauncher
                 DrawPackets(g, t, off / s);
                 g.ResetTransform();
                 int bob = (int)Math.Round(Math.Sin(t * 1.3) * 7f * s);
-                g.DrawImageUnscaled(figureS, dx, dy + bob);
+                DrawFigure(g, cw, s, dx, dy + bob);
                 g.ResetClip();
                 if (wipe < 1f)
                 {
@@ -679,6 +682,31 @@ namespace KillNetLauncher
                 }
                 int ox = (int)((rnd.NextDouble() * 2 - 1) * 70 * s * amt);
                 g.DrawImage(logosS[from], new Rectangle(dx + ox, dy + y0, cw, y1 - y0), new Rectangle(0, y0, cw, y1 - y0), GraphicsUnit.Pixel);
+            }
+        }
+
+        // The figure, still; or glitching from one to the other with the logo (MINECRAFT just switched).
+        private void DrawFigure(Graphics g, int cw, float s, int dx, int dy)
+        {
+            float b = T - brandAt;
+            if (b >= 0.34f || (fixedTime >= 0f && !fixedSwitch))
+            {
+                g.DrawImageUnscaled(figuresS[BrandIndex], dx, dy);
+                return;
+            }
+            int from = b < 0.17f ? brandFrom : BrandIndex;
+            float amt = b < 0.17f ? b / 0.17f : 1f - (b - 0.17f) / 0.17f;
+            int top = (int)(50 * s), bottom = (int)(620 * s), bands = 12;
+            var rnd = new Random((int)(b / 0.03f) * 6007 + 7);
+            for (int i = 0; i < bands; i++)
+            {
+                int y0 = top + (bottom - top) * i / bands, y1 = top + (bottom - top) * (i + 1) / bands;
+                if (rnd.NextDouble() < 0.2 * amt)
+                {
+                    continue;
+                }
+                int ox = (int)((rnd.NextDouble() * 2 - 1) * 60 * s * amt);
+                g.DrawImage(figuresS[from], new Rectangle(dx + ox, dy + y0, cw, y1 - y0), new Rectangle(0, y0, cw, y1 - y0), GraphicsUnit.Pixel);
             }
         }
 

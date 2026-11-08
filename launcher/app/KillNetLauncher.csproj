@@ -30,6 +30,7 @@
     <EmbeddedResource Include="Art\logo.png" LogicalName="logo.png" />
     <EmbeddedResource Include="Art\logo-craft.png" LogicalName="logo-craft.png" />
     <EmbeddedResource Include="Art\figure-small.png" LogicalName="figure-small.png" />
+    <EmbeddedResource Include="Art\figure-net.png" LogicalName="figure-net.png" />
     <EmbeddedResource Include="Art\wires.txt" LogicalName="wires.txt" />
     <EmbeddedResource Include="Art\icon.ico" LogicalName="icon.ico" />
     <EmbeddedResource Include="..\design\fonts\VCR_OSD_Replayed.ttf" LogicalName="vcr.ttf" />

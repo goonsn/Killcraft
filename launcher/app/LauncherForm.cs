@@ -22,7 +22,9 @@ namespace KillNetLauncher
 
         private readonly Settings settings = Settings.Load();
         private readonly bool forRender;
-        private readonly Bitmap bg, figure;
+        private readonly Bitmap bg;
+        // The figure on the right: KILLNET's globe (0), KILLCRAFT's exploded block (1).
+        private readonly Bitmap[] figures = new Bitmap[2];
         // KILLNET's logo (0) and KILLCRAFT's (1): which by MINECRAFT ON/OFF, as the mod names itself.
         private readonly Bitmap[] logos = new Bitmap[2];
         private readonly Rectangle[] logoBoxes = new Rectangle[2];
@@ -93,7 +95,8 @@ namespace KillNetLauncher
             bg = LoadArt("bg.png");
             logos[0] = LoadArt("logo.png");
             logos[1] = LoadArt("logo-craft.png");
-            figure = LoadArt("figure-small.png");
+            figures[0] = LoadArt("figure-net.png");
+            figures[1] = LoadArt("figure-small.png");
             logoBoxes[0] = Opaque(logos[0]);
             logoBoxes[1] = Opaque(logos[1]);
             wires = new Wires(Res("wires.txt"), bg.Height);

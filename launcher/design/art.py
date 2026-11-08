@@ -29,10 +29,12 @@ with open(os.path.join(out, "wires.txt"), "w") as f:
         f.write("B " + " ".join(str(int(v)) for v in b) + chr(10))
 print(f"bg: {placed} blocks ({left} names unused)")
 
-def layer(mask, x, y, halo):
+def layer(mask, x, y, halo, under=None):
     page = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     black = mask.filter(ImageFilter.MaxFilter(halo))
     page.paste((0, 0, 0, 255), (x, y), black)
+    if under is not None:
+        page.paste((0, 0, 0, 255), (x, y), under)
     page.paste((255, 255, 255, 255), (x, y), mask)
     return page
 
@@ -127,4 +129,85 @@ bx = small.getbbox()
 fx, fy = 1476 - (bx[0] + bx[2]) // 2, 62 - bx[1]
 layer(small, fx, fy, 5).save(os.path.join(out, "figure-small.png"), optimize=True)
 print("figure-small", fx + bx[0], fy + bx[1], fx + bx[2], fy + bx[3])
+
+# ---- KillNet's figure (Minecraft off): a globe with ULTRAKILL's dithered shading, its grid cut into it,
+# an orbit with a satellite, nodes linked all around (each with its packet's x), a chain of them below ----
+solid = []  # (each sphere's disc: black behind it, so the diagram doesn't show through its dark side)
+def sphere(img, cx, cy, r, grid=False, tilt=0.38):
+    solid.append((cx, cy, r))
+    px = img.load()
+    for y in range(int(cy - r) - 1, int(cy + r) + 2):
+        for x in range(int(cx - r) - 1, int(cx + r) + 2):
+            if not (0 <= x < img.width and 0 <= y < img.height):
+                continue
+            dx, dy = (x + 0.5 - cx) / r, (y + 0.5 - cy) / r
+            d2 = dx * dx + dy * dy
+            if d2 > 1:
+                continue
+            dz = math.sqrt(1 - d2)
+            light = max(0.0, -0.55 * dx - 0.6 * dy + 0.58 * dz)
+            on = light > 0.62 or (light > 0.36 and (x + y) % 2 == 0) or (light > 0.14 and x % 2 == 0 and y % 2 == 0)
+            if grid:
+                # (the globe's lines, as gaps: latitude and longitude every 30 degrees, its axis tilted)
+                yy = dy * math.cos(tilt) - dz * math.sin(tilt)
+                zz = dy * math.sin(tilt) + dz * math.cos(tilt)
+                lat = math.degrees(math.asin(max(-1, min(1, -yy))))
+                lon = math.degrees(math.atan2(dx, zz))
+                if min(abs(lat - k) for k in (-60, -30, 0, 30, 60)) < 2.2 or min(abs(lon - k) for k in range(-180, 181, 30)) < 2.6 * (1 + abs(lat) / 90):
+                    on = False
+            px[x, y] = 255 if on else 0
+    ImageDraw.Draw(img).ellipse([cx - r, cy - r, cx + r, cy + r], outline=255)
+
+net = Image.new("L", (300, 330), 0)
+nd = ImageDraw.Draw(net)
+gx, gy, gr = 150, 148, 46
+nodes = []
+for k in range(8):
+    a = -math.pi / 2 + k * math.pi / 4 + math.pi / 8
+    rr = 104 + (k % 2) * 16
+    nodes.append((int(gx + math.cos(a) * rr), int(gy + math.sin(a) * rr * 0.85), 8 + (k % 2) * 4))
+for x, y, r in nodes:
+    nd.line([gx, gy, x, y], fill=255)
+    nd.line([x + r + 3, y - 4, x + r + 9, y + 2], fill=255); nd.line([x + r + 9, y - 4, x + r + 3, y + 2], fill=255)
+# (the ring of links between neighbouring nodes, dotted)
+for i in range(8):
+    (x0, y0, _), (x1, y1, _) = nodes[i], nodes[(i + 1) % 8]
+    n = int(math.hypot(x1 - x0, y1 - y0) / 4)
+    for j in range(1, n):
+        net.putpixel((int(x0 + (x1 - x0) * j / n), int(y0 + (y1 - y0) * j / n)), 255)
+for x, y, r in nodes:
+    sphere(net, x, y, r)
+# (the orbit: an ellipse round the globe, behind it where the globe is; a satellite on it)
+orbit = Image.new("L", net.size, 0)
+ImageDraw.Draw(orbit).ellipse([gx - 74, gy - 22, gx + 74, gy + 22], outline=255, width=2)
+mask = Image.new("L", net.size, 0); ImageDraw.Draw(mask).ellipse([gx - gr - 3, gy - gr - 3, gx + gr + 3, gy + gr + 3], fill=255)
+op, mp, np_ = orbit.load(), mask.load(), net.load()
+for y in range(net.height):
+    for x in range(net.width):
+        if mp[x, y]:
+            np_[x, y] = 0
+sphere(net, gx, gy, gr, grid=True)
+for y in range(net.height):
+    for x in range(net.width):
+        if op[x, y] and (not mp[x, y] or y > gy):
+            np_[x, y] = 255
+sx, sy = gx + 62, gy + 13
+nd.rectangle([sx - 5, sy - 5, sx + 5, sy + 5], fill=0, outline=255)
+nd.rectangle([sx - 2, sy - 2, sx + 2, sy + 2], fill=255)
+# (below: a chain of three nodes, smaller each time, like the block's stack)
+y = gy + gr + 8
+for j, r in enumerate((13, 11, 9)):
+    cy = y + r + 6
+    nd.line([gx, y, gx, cy - r], fill=255)
+    sphere(net, gx, cy, r)
+    y = cy + r
+under = Image.new("L", net.size, 0)
+for cx, cy, r in solid:
+    ImageDraw.Draw(under).ellipse([cx - r - 1, cy - r - 1, cx + r + 1, cy + r + 1], fill=255)
+nsmall = net.resize((net.width * 2, net.height * 2), Image.NEAREST)
+under = under.resize(nsmall.size, Image.NEAREST)
+nb = nsmall.getbbox()
+nx, ny = 1476 - (nb[0] + nb[2]) // 2, 62 - nb[1]
+layer(nsmall, nx, ny, 5, under).save(os.path.join(out, "figure-net.png"), optimize=True)
+print("figure-net", nx + nb[0], ny + nb[1], nx + nb[2], ny + nb[3])
 print("ok")

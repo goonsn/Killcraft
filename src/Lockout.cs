@@ -114,7 +114,7 @@ namespace Killcraft
             dualCheck -= UnityEngine.Time.unscaledDeltaTime;
             if (dualCheck <= 0f)
             {
-                dualCheck = 0.25f;
+                dualCheck = 1f;
                 foreach (DualWield dual in UnityEngine.Object.FindObjectsOfType<DualWield>())
                 {
                     dual.gameObject.SetActive(false);

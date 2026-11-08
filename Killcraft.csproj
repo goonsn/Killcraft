@@ -25,19 +25,30 @@
     <Reference Include="UnityEngine.TerrainModule" HintPath="$(Managed)\UnityEngine.TerrainModule.dll" Private="false" />
     <Reference Include="UnityEngine.TerrainPhysicsModule" HintPath="$(Managed)\UnityEngine.TerrainPhysicsModule.dll" Private="false" />
     <Reference Include="UnityEngine.IMGUIModule" HintPath="$(Managed)\UnityEngine.IMGUIModule.dll" Private="false" />
+    <Reference Include="UnityEngine.AssetBundleModule" HintPath="$(Managed)\UnityEngine.AssetBundleModule.dll" Private="false" />
     <Reference Include="UnityEngine.TextRenderingModule" HintPath="$(Managed)\UnityEngine.TextRenderingModule.dll" Private="false" />
     <Reference Include="UnityEngine.UI" HintPath="$(Managed)\UnityEngine.UI.dll" Private="false" />
+    <Reference Include="UnityEngine.JSONSerializeModule" HintPath="$(Managed)\UnityEngine.JSONSerializeModule.dll" Private="false" />
+    <Reference Include="UnityEngine.ImageConversionModule" HintPath="$(Managed)\UnityEngine.ImageConversionModule.dll" Private="false" />
+    <Reference Include="UnityEngine.ScreenCaptureModule" HintPath="$(Managed)\UnityEngine.ScreenCaptureModule.dll" Private="false" />
     <Reference Include="UnityEngine.UIModule" HintPath="$(Managed)\UnityEngine.UIModule.dll" Private="false" />
     <Reference Include="UnityEngine.AIModule" HintPath="$(Managed)\UnityEngine.AIModule.dll" Private="false" />
     <Reference Include="Unity.Addressables" HintPath="$(Managed)\Unity.Addressables.dll" Private="false" />
     <Reference Include="Unity.ResourceManager" HintPath="$(Managed)\Unity.ResourceManager.dll" Private="false" />
     <Reference Include="UnityEngine.AnimationModule" HintPath="$(Managed)\UnityEngine.AnimationModule.dll" Private="false" />
     <Reference Include="Unity.InputSystem" HintPath="$(Managed)\Unity.InputSystem.dll" Private="false" />
+    <Reference Include="Unity.TextMeshPro" HintPath="$(Managed)\Unity.TextMeshPro.dll" Private="false" />
+    <Reference Include="UnityEngine.VideoModule" HintPath="$(Managed)\UnityEngine.VideoModule.dll" Private="false" />
+    <Reference Include="UnityEngine.AudioModule" HintPath="$(Managed)\UnityEngine.AudioModule.dll" Private="false" />
+    <Reference Include="UnityEngine.ParticleSystemModule" HintPath="$(Managed)\UnityEngine.ParticleSystemModule.dll" Private="false" />
+    <Reference Include="Facepunch.Steamworks.Win64" HintPath="$(Managed)\Facepunch.Steamworks.Win64.dll" Private="false" />
+    <Reference Include="Newtonsoft.Json" HintPath="$(Managed)\Newtonsoft.Json.dll" Private="false" />
   </ItemGroup>
 
   <Target Name="Deploy" AfterTargets="Build">
     <MakeDir Directories="$(PluginDir)" />
     <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(PluginDir)" />
+    <Copy SourceFiles="second-player.bat" DestinationFolder="$(PluginDir)" />
     <!-- Killcraft's Minecraft mod (mcmod, built with Gradle), shipped next to the plugin. -->
     <ItemGroup>
       <ModJar Include="mcmod\build\libs\killcraft-mc-*.jar" />

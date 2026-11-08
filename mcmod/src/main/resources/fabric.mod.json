@@ -12,6 +12,7 @@
   "license": "MIT",
   "environment": "*",
   "entrypoints": {
+    "preLaunch": ["dev.killcraft.mc.KillcraftPreLaunch"],
     "main": ["dev.killcraft.mc.Killcraft"],
     "client": ["dev.killcraft.mc.KillcraftClient"]
   },

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Text;
 using UnityEngine;
@@ -77,6 +77,8 @@ namespace Killcraft
                     Z = HeldItems.Carried(ItemType.SkullGreen),
                     Yaw = following ? 1f : 0f,
                     Width = Host.FreezeWanted ? 1f : 0f,  // ULTRAKILL paused: Minecraft freezes too
+                    // The host's PvP setting, as it is now: 1 off; on, 2 plus its damage.
+                    Height = Plugin.PvP.Value ? 2f + Mathf.Clamp(Plugin.PvpDamage.Value, 0.1f, 3f) : 1f,
                     Name = heldName,
                 };
                 count = Destruction.Publish(records, count);
@@ -87,7 +89,7 @@ namespace Killcraft
                 float range = RangeBlocks * Coords.U;
                 foreach (EnemyIdentifier eid in tracker != null ? tracker.GetCurrentEnemies() : (IEnumerable<EnemyIdentifier>)Array.Empty<EnemyIdentifier>())
                 {
-                    if (eid == null || count >= Proto.MaxActors - Reserved || !TryBounds(eid, out Bounds b) || (b.center - p).sqrMagnitude > range * range)
+                    if (eid == null || Pvp.Is(eid) || count >= Proto.MaxActors - Reserved || !TryBounds(eid, out Bounds b) || (b.center - p).sqrMagnitude > range * range)
                     {
                         continue;
                     }
@@ -295,8 +297,18 @@ namespace Killcraft
                     // (Minecraft's damage is ULTRAKILL's / 5; ULTRAKILL's own hurt cooldown paces lava.)
                     if (nm != null && !nm.dead && !Patches.OwnsPlayer && e.A > 0f)
                     {
+                        // (A sword or arrow, a mob's or another player's, from there: V1 punching it parries it.)
+                        if (e.Flags != 0 && Pvp.Parrying(Coords.ToUnity(e.B, e.C, e.D)))
+                        {
+                            Pvp.ParriedMinecraft(nm, e.Flags, e.A, Coords.ToUnity(e.B, e.C, e.D));
+                            break;
+                        }
                         nm.GetHurt(Mathf.Max(1, Mathf.RoundToInt(e.A * 5f)), true);
                     }
+                    break;
+                case Proto.EvKcBled:
+                    // (Minecraft's 20 health is V1's 100.)
+                    Pvp.Bleed(e.A * 5f, Coords.ToUnity(e.B, e.C, e.D), 0);
                     break;
                 case Proto.EvKcHeldSelected:
                     HeldItems.Selected((int)e.A);

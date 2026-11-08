@@ -11,6 +11,8 @@ namespace Killcraft
     internal static class Patches
     {
         public static bool OwnsPlayer;
+        // A hit from another player (Pvp): Minecraft's player takes it as it comes (not as an enemy's).
+        public static bool PvpHit;
         public static bool McScreenOpen;
         public static bool AllowDamage;
         // A Potion of ULTRAKILL: ULTRAKILL's movement runs although Minecraft has the player.
@@ -53,7 +55,8 @@ namespace Killcraft
 
         // The cheat menu (Home / ~) and the cheat code: not while Minecraft has the player.
         [HarmonyPatch(typeof(CheatsController), "Update"), HarmonyPrefix]
-        private static bool CheatsUpdate() => !OwnsPlayer;
+        // (Nor in a party made with CHEATS: OFF.)
+        private static bool CheatsUpdate() => !OwnsPlayer && !ServerList.CheatsBlocked;
 
         // Esc closes an open Minecraft screen instead of pausing ULTRAKILL.
         [HarmonyPatch(typeof(OptionsManager), "Update"), HarmonyPrefix]
@@ -79,6 +82,9 @@ namespace Killcraft
             {
                 Host.Current?.ThirdPerson();
             }
+            UkThirdPerson.Place();
+            Spectate.Place();
+            ReplayPlayer.Place();
         }
 
         // Who is hitting V1 right now: set around ULTRAKILL's enemy melee and projectile hits.
@@ -203,6 +209,7 @@ namespace Killcraft
         [HarmonyPatch(typeof(NewMovement), nameof(NewMovement.GetHurt)), HarmonyPrefix]
         private static bool GetHurt(NewMovement __instance, int damage, bool explosion)
         {
+            Pvp.HpBefore = __instance.hp;
             if (!OwnsPlayer || AllowDamage)
             {
                 return true;
@@ -215,7 +222,7 @@ namespace Killcraft
             // hazards (lava, pits, hurt zones) stay unblockable.
             uint attacker = hitKind != Proto.HurtOther ? Combat.AttackerFor(hitEnemy, hitFrom, hitDir) : 0;
             ushort kind = attacker != 0 ? hitKind : explosion ? Proto.HurtMagic : Proto.HurtOther;
-            float scale = Plugin.DamageToMinecraft.Value * DifficultyScale();
+            float scale = PvpHit ? 1f : Plugin.DamageToMinecraft.Value * DifficultyScale();
             // Bosses hit harder, and through armour (Minecraft's magic damage, which only Protection
             // lessens): prot IV netherite would otherwise take most of it off. Not while the right
             // button is held, so a raised shield still blocks them (magic goes through shields).
@@ -231,6 +238,29 @@ namespace Killcraft
             Link.PushInput(Proto.InHurt, kind, scaled, (int)attacker, 0);
             Combat.HurtBy(attacker);
             __instance.FakeHurt();
+            return false;
+        }
+
+        // V1 hurt (ULTRAKILL mode): it bleeds, for the other players (Pvp).
+        [HarmonyPatch(typeof(NewMovement), nameof(NewMovement.GetHurt)), HarmonyPostfix]
+        private static void GetHurtAfter(NewMovement __instance)
+        {
+            if (!OwnsPlayer && __instance.hp < Pvp.HpBefore)
+            {
+                Pvp.Bleed(Pvp.HpBefore - __instance.hp, __instance.transform.position, Pvp.HitBy);
+            }
+        }
+
+        // Healing in Minecraft mode (blood V1 stands in: another player's, an enemy's): Minecraft's
+        // health is the real one, so Minecraft's player heals (by a fifth: 100 health vs 20).
+        [HarmonyPatch(typeof(NewMovement), nameof(NewMovement.GetHealth)), HarmonyPrefix]
+        private static bool GetHealth(NewMovement __instance, int health)
+        {
+            if (!OwnsPlayer || __instance.dead)
+            {
+                return true;
+            }
+            Destruction.Heal(Mathf.Min(health, 30) / 5f);
             return false;
         }
 
@@ -269,6 +299,11 @@ namespace Killcraft
         [HarmonyPatch(typeof(Explosion), "Start"), HarmonyPostfix]
         private static void ExplosionAfter(Explosion __instance)
         {
+            if (Shots.IsMade(__instance))
+            {
+                return;  // (another player's, shown here: theirs hit things there)
+            }
+            Shots.Explosion(__instance);
             MobHits.Explosion(__instance);
             Destruction.Explosion(__instance);
         }
@@ -277,6 +312,10 @@ namespace Killcraft
         [HarmonyPatch(typeof(Projectile), "FixedUpdate"), HarmonyPostfix]
         private static void ProjectileAfter(Projectile __instance)
         {
+            if (__instance.playerBullet && !__instance.parried)
+            {
+                Shots.Track(__instance);
+            }
             if (MobHits.Active && (__instance.playerBullet || __instance.parried || __instance.sourceWeapon != null) && !__instance.hittingPlayer)
             {
                 MobHits.Moving(__instance, __instance.transform.position, 0.3f, Mathf.Max(__instance.damage, 0.25f), false);
@@ -286,6 +325,10 @@ namespace Killcraft
         [HarmonyPatch(typeof(Nail), "FixedUpdate"), HarmonyPostfix]
         private static void NailAfter(Nail __instance)
         {
+            if (!__instance.enemy)
+            {
+                Shots.Track(__instance);
+            }
             if (MobHits.Active && !__instance.enemy)
             {
                 MobHits.Moving(__instance, __instance.transform.position, __instance.sawblade ? 0.5f : 0.2f, Mathf.Max(__instance.damage, 0.1f), false);
@@ -300,7 +343,11 @@ namespace Killcraft
         }
 
         [HarmonyPatch(typeof(Punch), "ActiveStart"), HarmonyPostfix]
-        private static void PunchAfter(Punch __instance) => MobHits.Punch(__instance);
+        private static void PunchAfter(Punch __instance)
+        {
+            Pvp.Punched();
+            MobHits.Punch(__instance);
+        }
 
         [HarmonyPatch(typeof(Revolver), "Shoot"), HarmonyPrefix]
         private static void RevolverShot(Revolver __instance, int shotType)
@@ -314,8 +361,13 @@ namespace Killcraft
         [HarmonyPatch(typeof(RevolverBeam), "Start"), HarmonyPostfix]
         private static void BeamAfter(RevolverBeam __instance)
         {
+            if (Shots.IsMade(__instance))
+            {
+                return;
+            }
             MobHits.Beam(__instance);
             Destruction.Beam(__instance);
+            Shots.Beam(__instance);
         }
 
         // ULTRAKILL itself doesn't scale the damage V1 takes by difficulty (only how its enemies fight).

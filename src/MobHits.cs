@@ -63,6 +63,10 @@ namespace Killcraft
                     {
                         continue;  // the player itself
                     }
+                    if (IsPvpTarget(feet, u))
+                    {
+                        continue;  // another player, hit as ULTRAKILL's target there instead (Pvp)
+                    }
                     // (Only the width comes along: the tall ones are about two blocks, the wide ones as tall as wide.)
                     float w = Mathf.Max(e.Scale, 0.3f);
                     float h = w < 1f ? 2f : w;
@@ -78,6 +82,18 @@ namespace Killcraft
             push.Clear();
         }
 
+        private static bool IsPvpTarget(Vector3 feet, float u)
+        {
+            foreach (Vector3 p in Pvp.Places())
+            {
+                if (Mathf.Abs(feet.x - p.x) < 0.8f * u && Mathf.Abs(feet.z - p.z) < 0.8f * u && Mathf.Abs(feet.y - p.y) < 1.5f * u)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         private static void Hurt(Mob m, float ukDamage, Vector3 dir)
         {
             float amount = ukDamage * DamageToMc;
@@ -86,6 +102,7 @@ namespace Killcraft
                 return;
             }
             damage[m.Id] = (damage.TryGetValue(m.Id, out float d) ? d : 0f) + amount;
+            DamageNumbers.Enemy(m.Id, m.Center + Vector3.up * m.Half.y, ukDamage, false, false);
             push[m.Id] = (push.TryGetValue(m.Id, out Vector3 p) ? p : Vector3.zero) + dir.normalized;
         }
 

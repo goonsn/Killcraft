@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 using UnityEngine.UI;
 
 namespace Killcraft
@@ -38,7 +38,9 @@ namespace Killcraft
         public static void Frame(bool show)
         {
             Ensure();
-            if (Link.AcquireOverlayFrame())
+            // (Only while it's shown: each frame is a whole screen's worth of pixels to copy, and was
+            // copied every frame in ULTRAKILL mode too, unseen.)
+            if (show && Link.AcquireOverlayFrame())
             {
                 Link.FrontHeader(out int w, out int h, out bool bottomUp);
                 if (w > 0 && h > 0 && w <= Proto.MaxOverlayW && h <= Proto.MaxOverlayH)

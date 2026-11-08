@@ -48,16 +48,24 @@ final class Destruction {
 	static void tick(ServerPlayer player, List<SkyLink.Actor> actors) {
 		ServerLevel level = (ServerLevel) player.level();
 		for (SkyLink.Actor a : actors) {
-			if (a.formId() < REQUEST_IDS || a.formId() > REQUEST_IDS + REQUEST_COUNT || !DONE.add(a.name())) {
+			// (Each player's Killcraft numbers its own requests.)
+			if (a.formId() < REQUEST_IDS || a.formId() > REQUEST_IDS + REQUEST_COUNT || !DONE.add(player.getStringUUID() + a.name())) {
 				continue;
 			}
-			while (DONE.size() > 1024) {
+			while (DONE.size() > 4096) {
 				DONE.remove(DONE.iterator().next());
 			}
 			int kind = a.level() & 0xFF;
 			// ULTRAKILL's weapons on a mob (anywhere): as the player hit it.
 			if (kind == 3) {
 				hurt(level, player, Math.round(a.x()), a.width(), a.yaw(), a.height(), a.healthFrac());
+				continue;
+			}
+			// Blood ULTRAKILL's player stood in (in Minecraft mode): Minecraft's player heals by it.
+			if (kind == 6) {
+				if (player.isAlive()) {
+					player.heal(Math.min(Math.max(a.width(), 0.0F), 6.0F));
+				}
 				continue;
 			}
 			// Out of the Nether, back through the player's portal (Killcraft's data pack).
@@ -84,9 +92,19 @@ final class Destruction {
 
 	private static void hurt(ServerLevel level, ServerPlayer player, int id, float amount, float dx, float dz, float knock) {
 		Entity e = level.getEntity(id);
-		if (!(e instanceof LivingEntity mob) || e instanceof Player || !e.isAlive() || amount <= 0.0F
+		// (Other players only with the host's PvP setting.)
+		if (!(e instanceof LivingEntity mob) || e == player || (e instanceof Player && !Killcraft.pvp) || !e.isAlive() || amount <= 0.0F
 			|| e.getClass().getName().startsWith("dev.skycraft")) {
 			return;
+		}
+		if (e instanceof Player target) {
+			// A player in ULTRAKILL mode is hit as V1, in ULTRAKILL (its PvP target there), not here too.
+			if (Killcraft.following(target)) {
+				return;
+			}
+			// One in Minecraft mode: ULTRAKILL's weapons toned down for its 20 health (a shotgun blast
+			// was all of it), by the host's PvP damage.
+			amount = Math.min(amount * 0.3F, 7.0F) * Killcraft.pvpDamage;
 		}
 		mob.setInvulnerableTime(0);  // (ULTRAKILL's weapons hit fast: every hit counts)
 		mob.hurtServer(level, level.damageSources().playerAttack(player), Math.min(amount, 1000.0F));

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
@@ -22,6 +22,15 @@ namespace Killcraft
             public Mesh Mesh;
             public GameObject Solids;
             public GameObject Lights;
+            // For lighting it again (BlockLight): each vertex's Minecraft colour, block light, normal.
+            public uint[] Base;
+            public float[] BlockLight, SkyLight;
+            public Vector3[] Normals;
+            public bool[] TwoSided;
+            public byte[] Faces;
+            public Color[] Colors;
+            public int LitVersion = -1;
+            public bool Lit;
         }
 
         private static GameObject root;
@@ -89,6 +98,45 @@ namespace Killcraft
 
         private static bool fromTemplate;
         private static readonly List<Renderer> renderers = new List<Renderer>();
+
+        // Minecraft's water (its own part of each section's mesh: Killcraft's mod marks it): drawn as
+        // the other see-through blocks, or, with Killcraft's shaders on, with their water (ShaderPack).
+        private static Material waterFancy;
+        private static bool waterOn;
+        private static Material WaterMaterial => waterOn && waterFancy != null ? waterFancy : translucent;
+
+        private static Material[] Mats(int count, Material first) =>
+            count >= 3 ? new[] { first, translucent, WaterMaterial } : count == 2 ? new[] { first, translucent } : new[] { first };
+
+        // Killcraft's shaders' water on (its shader) or off (null).
+        internal static void UseWater(Shader shader)
+        {
+            bool on = shader != null;
+            if (on && (waterFancy == null || waterFancy.shader != shader))
+            {
+                waterFancy = new Material(shader) { name = "Killcraft water", hideFlags = HideFlags.DontUnloadUnusedAsset };
+            }
+            if (waterFancy != null && atlas != null)
+            {
+                waterFancy.mainTexture = atlas;
+            }
+            if (on == waterOn)
+            {
+                return;
+            }
+            waterOn = on;
+            renderers.RemoveAll(r => r == null);
+            foreach (Renderer r in renderers)
+            {
+                Material[] m = r.sharedMaterials;
+                if (m.Length >= 3)
+                {
+                    m[2] = WaterMaterial;
+                    r.sharedMaterials = m;
+                }
+            }
+            Plugin.Log.LogInfo($"render: water {(on ? "drawn with Killcraft's shaders' water" : "drawn as the other see-through blocks")}");
+        }
         private static int debugMode = -1;
 
         // F7 (debug): cycle block material set-ups to compare how ULTRAKILL lights them.
@@ -105,7 +153,7 @@ namespace Killcraft
             renderers.RemoveAll(r => r == null);
             foreach (Renderer r in renderers)
             {
-                r.sharedMaterials = r.sharedMaterials.Length == 2 ? new[] { m, translucent } : new[] { m };
+                r.sharedMaterials = Mats(r.sharedMaterials.Length, m);
             }
         }
 
@@ -198,7 +246,7 @@ namespace Killcraft
         {
             float k = Mathf.Clamp(Plugin.BlockBrightness.Value, 0.05f, 2f);
             var tint = new Color(k, k, k, 1f);
-            var all = new List<Material> { cutout, translucent };
+            var all = new List<Material> { cutout, translucent, waterFancy };
             foreach (EntityTexture t in textures.Values)
             {
                 all.Add(t.Cutout);
@@ -210,6 +258,15 @@ namespace Killcraft
                 {
                     m.SetColor("_Color", tint);
                 }
+            }
+        }
+
+        // The block brightness setting changed (Killcraft's options in the pause menu).
+        internal static void BrightnessChanged()
+        {
+            if (cutout != null)
+            {
+                ApplyAmbient();
             }
         }
 
@@ -227,7 +284,7 @@ namespace Killcraft
                     renderers.RemoveAll(r => r == null);
                     foreach (Renderer r in renderers)
                     {
-                        r.sharedMaterials = r.sharedMaterials.Length == 2 ? new[] { cutout, translucent } : new[] { cutout };
+                        r.sharedMaterials = Mats(r.sharedMaterials.Length, cutout);
                     }
                     if (outlineGo != null && lines != null)
                     {
@@ -310,6 +367,10 @@ namespace Killcraft
             {
                 cutout.mainTexture = atlas;
                 translucent.mainTexture = atlas;
+                if (waterFancy != null)
+                {
+                    waterFancy.mainTexture = atlas;
+                }
             }
             return true;
         }
@@ -430,6 +491,10 @@ namespace Killcraft
             {
                 cutout.mainTexture = atlas;
                 translucent.mainTexture = atlas;
+                if (waterFancy != null)
+                {
+                    waterFancy.mainTexture = atlas;
+                }
             }
             Plugin.Log.LogInfo($"render: Minecraft atlas {w}x{h}");
         }
@@ -588,6 +653,11 @@ namespace Killcraft
                     flashVertex = new bool[blockAtlasVertex.Length];
                 }
                 Array.Clear(blockAtlasVertex, 0, vertices);
+                bool ukLit = BlockLight.Active && !Coords.InNether;
+                scBase.Clear();
+                scBlock.Clear();
+                scFace.Clear();
+                sceneLit = false;
                 for (int b = 0; b < batches; b++)
                 {
                     byte* hdr = p + head + 8 + b * 16;
@@ -612,6 +682,13 @@ namespace Killcraft
                     // (Vertex colours multiply the texture, so white needs its own white material.)
                     flashVertex[i] = blockAtlasVertex[i] && (light & 0xFF) >= 15 && ((light >> 8) & 0xFF) >= 15;
                     sc.Add(flashVertex[i] ? new Color32(255, 255, 255, 255) : col);
+                    scBase.Add(flashVertex[i] ? 0xFFFFFFFFu : c);
+                    scBlock.Add(flashVertex[i] ? 10f : LightCurve((int)(light & 0xFF)));
+                    scFace.Add((byte)((flags >> 4) & 7));
+                }
+                if (ukLit)
+                {
+                    LightScene(vertices, go != null ? go.transform : null);
                 }
                 for (int b = 0; b < batches; b++)
                 {
@@ -660,7 +737,14 @@ namespace Killcraft
             sceneMesh.Clear();
             sceneMesh.SetVertices(sv);
             sceneMesh.SetUVs(0, suv);
-            sceneMesh.SetColors(sc);
+            if (sceneLit)
+            {
+                sceneMesh.SetColors(scLit);
+            }
+            else
+            {
+                sceneMesh.SetColors(sc);
+            }
             sceneMesh.subMeshCount = used;
             for (int i = 0; i < used; i++)
             {
@@ -718,8 +802,193 @@ namespace Killcraft
             return s;
         }
 
+        // ---- ULTRAKILL's light (BlockLight) ----
+
+        // To Killcraft's mod: the first-person hand's packed light (KillNetClient.handLight; -1 its own).
+        private const byte HandLight = 202;
+
+        private static readonly List<uint> scBase = new List<uint>();
+        private static readonly List<float> scBlock = new List<float>();
+        private static readonly List<byte> scFace = new List<byte>();
+        private static readonly List<Color> scLit = new List<Color>();
+        private static readonly List<int> nearLights = new List<int>();
+        private static Vector3[] scNormals = new Vector3[0], scWorld = new Vector3[0];
+        private static readonly List<int> handLights = new List<int>();
+        private static float handAt;
+        private static int handSent = -2;
+        private static float handResend;
+        private static bool[] scTwoSided = new bool[0];
+        private static byte[] scFaces = new byte[0];
+        private static bool sceneLit;
+
+        // Each vertex's normal: its Minecraft face's, or (no face: plants, items' flat quads) its
+        // triangle's, lit from either side. (Triangles here are three vertices of their own each.)
+        private static void Normals(IList<Vector3> verts, byte[] faces, Vector3[] normals, bool[] twoSided, int n)
+        {
+            for (int t = 0; t + 2 < n; t += 3)
+            {
+                Vector3 tri = Vector3.Cross(verts[t + 1] - verts[t], verts[t + 2] - verts[t]);
+                tri = tri.sqrMagnitude > 1e-12f ? tri.normalized : Vector3.up;
+                for (int k = 0; k < 3; k++)
+                {
+                    int f = faces[t + k];
+                    bool none = f == 0 || f == 7;
+                    normals[t + k] = none ? tri : BlockLight.FaceNormal[f];
+                    twoSided[t + k] = none;
+                }
+            }
+        }
+
+        private static void LightSection(Section s, Vector3[] local)
+        {
+            int n = s.Base.Length;
+            Transform t = s.Go.transform;
+            Vector3 centre = t.TransformPoint(new Vector3(8f, 8f, -8f) * Coords.U);
+            BlockLight.Where where = BlockLight.Place(centre);
+            BlockLight.Near(centre, 14f * Coords.U, where, nearLights);
+            Mesh mesh = s.Mesh;
+            for (int i = 0; i < n; i++)
+            {
+                Vector3 world = t.TransformPoint(local[i]);
+                Vector3 uk = BlockLight.At(world, s.Normals[i], s.TwoSided[i], nearLights);
+                if (i == 0 && uk.x + uk.y + uk.z < 0.15f)
+                {
+                    BlockLight.Dark(centre, where, nearLights, uk);
+                }
+                s.Colors[i] = BlockLight.Colour(s.Base[i], s.BlockLight[i], uk, faceShade[s.Faces[i]]);
+            }
+            s.LitVersion = BlockLight.Version;
+        }
+
+        // (The player model's vertices are its own, round its feet: placed where it is; the scene's are
+        // the world's already.)
+        private static void LightScene(int n, Transform at)
+        {
+            if (scNormals.Length < n)
+            {
+                scNormals = new Vector3[Math.Max(n, scNormals.Length * 2)];
+                scTwoSided = new bool[scNormals.Length];
+                scFaces = new byte[scNormals.Length];
+            }
+            if (scWorld.Length < n)
+            {
+                scWorld = new Vector3[Math.Max(n, scWorld.Length * 2)];
+            }
+            for (int i = 0; i < n; i++)
+            {
+                scWorld[i] = at != null ? at.TransformPoint(sv[i]) : sv[i];
+            }
+            Bounds b = new Bounds(scWorld[0], Vector3.zero);
+            for (int i = 0; i < n; i++)
+            {
+                scFaces[i] = scFace[i];
+                b.Encapsulate(scWorld[i]);
+            }
+            Normals(scWorld, scFaces, scNormals, scTwoSided, n);
+            BlockLight.Near(b.center, b.extents.magnitude, BlockLight.Place(b.center), nearLights);
+            // (Every frame: lit once a triangle, at its middle.)
+            scLit.Clear();
+            for (int t = 0; t < n; t += 3)
+            {
+                int m = Math.Min(3, n - t);
+                Vector3 mid = Vector3.zero;
+                for (int k = 0; k < m; k++)
+                {
+                    mid += scWorld[t + k];
+                }
+                Vector3 uk = BlockLight.At(mid / m, scNormals[t], scTwoSided[t], nearLights);
+                for (int k = 0; k < m; k++)
+                {
+                    int i = t + k;
+                    scLit.Add(scBase[i] == 0xFFFFFFFFu ? Color.white : BlockLight.Colour(scBase[i], scBlock[i], uk, faceShade[scFaces[i]]));
+                }
+            }
+            sceneLit = true;
+        }
+
+        // Each frame: the level's lights as they are now, and sections lit again when they've changed
+        // (a few at a time).
+        public static void Relight()
+        {
+            BlockLight.Frame();
+            // The first-person hand (Minecraft draws it): ULTRAKILL's light where the camera is.
+            if ((handAt -= Time.unscaledDeltaTime) <= 0f)
+            {
+                handAt = 0.1f;
+                Camera cam = Camera.main;
+                int light = BlockLight.Active && !Coords.InNether && cam != null ? BlockLight.HandLight(cam.transform.position, handLights) : -1;
+                handResend -= 0.1f;
+                if (light != handSent || handResend <= 0f)
+                {
+                    handSent = light;
+                    handResend = 2f;
+                    KillNet.Send(HandLight, KillNet.ToMinecraft, w => w.Write(light));
+                }
+            }
+            int budget = 40000;
+            if (!BlockLight.Active)
+            {
+                // (Lit by a level's lights before, not now (another level, the sandbox): Minecraft's own
+                // light again.)
+                foreach (Section s in sections.Values)
+                {
+                    if (budget <= 0)
+                    {
+                        break;
+                    }
+                    if (!s.Lit || s.Mesh == null || s.Base == null || s.Faces == null || s.SkyLight == null || s.Mesh.vertexCount != s.Base.Length)
+                    {
+                        continue;
+                    }
+                    int count = s.Base.Length;
+                    var mc = new Color32[count];
+                    for (int i = 0; i < count; i++)
+                    {
+                        mc[i] = McColour(s.Base[i], s.Faces[i], s.BlockLight[i], s.SkyLight[i]);
+                    }
+                    s.Mesh.colors32 = mc;
+                    s.Colors = null;
+                    s.Lit = false;
+                    s.LitVersion = -1;
+                    budget -= count;
+                }
+                return;
+            }
+            foreach (Section s in sections.Values)
+            {
+                if (budget <= 0)
+                {
+                    break;
+                }
+                if (s.Go == null || s.Mesh == null || s.Base == null || s.Faces == null || s.LitVersion == BlockLight.Version || Coords.IsNetherX(s.Sx * 16.0))
+                {
+                    continue;
+                }
+                int n = s.Base.Length;
+                if (s.Mesh.vertexCount != n)
+                {
+                    continue;
+                }
+                if (s.Colors == null || s.Colors.Length != n)
+                {
+                    s.Colors = new Color[n];
+                }
+                LightSection(s, s.Mesh.vertices);
+                s.Mesh.colors = s.Colors;
+                s.Lit = true;
+                budget -= n;
+            }
+        }
+
         // Minecraft's fixed face shading (left out of the vertex colours): up 1, down 0.5, N/S 0.8, E/W 0.6.
         private static readonly float[] faceShade = { 1f, 0.5f, 1f, 0.8f, 0.8f, 0.6f, 0.6f, 1f };
+
+        // A vertex's colour by Minecraft's own light: its face's shade, the brighter of block and sky light.
+        private static Color32 McColour(uint c, byte face, float block, float sky)
+        {
+            float k = faceShade[face & 7] * (0.3f + 0.7f * Mathf.Max(block, sky));
+            return new Color32((byte)((c & 0xFF) * k), (byte)(((c >> 8) & 0xFF) * k), (byte)(((c >> 16) & 0xFF) * k), (byte)(c >> 24));
+        }
 
         private static float LightCurve(int level)
         {
@@ -746,6 +1015,12 @@ namespace Killcraft
             var colors = new Color32[n];
             var solid = new List<int>(n);
             var glass = new List<int>();
+            var water = new List<int>();
+            bool ukLit = BlockLight.Active && !Coords.IsNetherX(sx * 16.0);
+            var baseColor = new uint[n];
+            var blockLight = new float[n];
+            var skyLight = new float[n];
+            var faces = new byte[n];
             byte* v = p + 16;
             for (int i = 0; i < n; i++, v += 32)
             {
@@ -753,15 +1028,16 @@ namespace Killcraft
                 verts[i] = new Vector3(x * u, y * u, -z * u);
                 uvs[i] = new Vector2(*(float*)(v + 12), *(float*)(v + 16));
                 uint c = *(uint*)(v + 20), light = *(uint*)(v + 24), flags = *(uint*)(v + 28);
-                float shade = faceShade[(flags >> 4) & 7];
-                float lit = 0.3f + 0.7f * Mathf.Max(LightCurve((int)(light & 0xFF)), LightCurve((int)((light >> 8) & 0xFF)));
-                float k = shade * lit;
-                colors[i] = new Color32((byte)((c & 0xFF) * k), (byte)(((c >> 8) & 0xFF) * k), (byte)(((c >> 16) & 0xFF) * k), (byte)(c >> 24));
+                baseColor[i] = c;
+                blockLight[i] = LightCurve((int)(light & 0xFF));
+                skyLight[i] = LightCurve((int)((light >> 8) & 0xFF));
+                faces[i] = (byte)((flags >> 4) & 7);
+                colors[i] = McColour(c, faces[i], blockLight[i], skyLight[i]);
             }
             for (int t = 0; t + 2 < n; t += 3)
             {
                 uint flags = *(uint*)(p + 16 + t * 32 + 28);
-                List<int> list = (flags & 2) != 0 ? glass : solid;
+                List<int> list = (flags & 2) == 0 ? solid : (flags & 0x100) != 0 ? water : glass;
                 // The Z mirror flips the winding back to front.
                 list.Add(t);
                 list.Add(t + 2);
@@ -772,7 +1048,7 @@ namespace Killcraft
                 s.Mesh = new Mesh { name = s.Go.name };
                 s.Go.AddComponent<MeshFilter>().sharedMesh = s.Mesh;
                 var mr = s.Go.AddComponent<MeshRenderer>();
-                mr.sharedMaterials = new[] { cutout, translucent };
+                mr.sharedMaterials = new[] { cutout, translucent, WaterMaterial };
                 // (The Nether is thousands of sections: no shadows from its terrain.)
                 mr.shadowCastingMode = Coords.IsNetherX(s.Sx * 16.0) ? ShadowCastingMode.Off : ShadowCastingMode.On;
                 renderers.Add(mr);
@@ -781,10 +1057,29 @@ namespace Killcraft
             s.Mesh.indexFormat = n > 65000 ? IndexFormat.UInt32 : IndexFormat.UInt16;
             s.Mesh.vertices = verts;
             s.Mesh.uv = uvs;
-            s.Mesh.colors32 = colors;
-            s.Mesh.subMeshCount = 2;
+            s.Base = baseColor;
+            s.BlockLight = blockLight;
+            s.SkyLight = skyLight;
+            s.Normals = new Vector3[n];
+            s.TwoSided = new bool[n];
+            s.Faces = faces;
+            Normals(verts, faces, s.Normals, s.TwoSided, n);
+            s.Lit = ukLit;
+            if (ukLit)
+            {
+                s.Colors = new Color[n];
+                LightSection(s, verts);
+                s.Mesh.colors = s.Colors;
+            }
+            else
+            {
+                s.Colors = null;
+                s.Mesh.colors32 = colors;
+            }
+            s.Mesh.subMeshCount = 3;
             s.Mesh.SetTriangles(solid, 0);
             s.Mesh.SetTriangles(glass, 1);
+            s.Mesh.SetTriangles(water, 2);
             s.Mesh.RecalculateNormals();
             s.Mesh.RecalculateBounds();
         }
@@ -1217,6 +1512,26 @@ namespace Killcraft
         private static readonly List<Vector3> ov = new List<Vector3>();
         private static readonly List<Color32> oc = new List<Color32>();
         private static readonly List<int> oi = new List<int>();
+
+        // While Killcraft's shaders draw the sun's shadow map: the block outline casts none (its lines'
+        // shadow was on the ground under it).
+        internal static bool HideForShadows()
+        {
+            if (outlineGo == null || !outlineGo.activeSelf)
+            {
+                return false;
+            }
+            outlineGo.SetActive(false);
+            return true;
+        }
+
+        internal static void ShowAfterShadows()
+        {
+            if (outlineGo != null)
+            {
+                outlineGo.SetActive(true);
+            }
+        }
 
         private static void Outline(bool has, Vector3 lo, Vector3 hi)
         {

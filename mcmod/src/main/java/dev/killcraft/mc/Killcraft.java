@@ -32,6 +32,8 @@ import net.minecraft.world.level.block.state.BlockBehaviour;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 import dev.skycraft.link.SkyLink;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
@@ -51,6 +53,7 @@ public final class Killcraft implements ModInitializer {
 	public static final int EV_HELD_SELECTED = 103;   // the skull in the player's hand (ULTRAKILL's ItemType), or 0
 	public static final int EV_FOLLOWER_HURT = 104;   // ULTRAKILL has V1: what would have hurt Minecraft's player (a), for V1
 	public static final int EV_DIMENSION = 105;      // which world the player is really in (a: 1 the Nether)
+	public static final int EV_BLED = 106;           // Minecraft's player was hurt (a, Minecraft's), at b, c, d: it bleeds
 
 	/** How long a Potion of ULTRAKILL lasts, in ticks. */
 	public static final int POTION_TICKS = 2 * 60 * 20;
@@ -110,27 +113,100 @@ public final class Killcraft implements ModInitializer {
 			})
 			.build());
 
+		PlayerLink.init();
+		GuestStandIns.init();
+		net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents.JOIN.register((handler, sender, server) ->
+			JOINED.put(handler.getPlayer().getUUID(), System.currentTimeMillis()));
+		net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents.DISCONNECT.register((handler, server) ->
+			JOINED.remove(handler.getPlayer().getUUID()));
+		KillNet.init();
 		ServerTickEvents.END_SERVER_TICK.register(Killcraft::tick);
-		// While ULTRAKILL has V1, Minecraft's player only follows it about: what would hurt it (mobs,
-		// lava, fire, falling into the void) hurts V1 instead.
+		// A player hurt in Minecraft mode bleeds in ULTRAKILL, for the others (their ULTRAKILLs
+		// spill ULTRAKILL's blood there, which heals whoever stands in it).
+		ServerLivingEntityEvents.AFTER_DAMAGE.register((entity, source, baseDamage, damage, blocked) -> {
+			if (entity instanceof ServerPlayer player && damage > 0.0F && !blocked && !FOLLOWING.contains(player.getUUID())) {
+				PlayerLink.push(player, EV_BLED, damage, (float) player.getX(), (float) (player.getY() + 1.0), (float) player.getZ(), 0);
+			}
+		});
 		ServerLivingEntityEvents.ALLOW_DAMAGE.register((entity, source, amount) -> {
-			if (entity instanceof ServerPlayer && following) {
-				Link.push(EV_FOLLOWER_HURT, amount, 0, 0, 0, 0);
+			if (!(entity instanceof ServerPlayer player)) {
+				return true;
+			}
+			// Just joined (a friend's world puts them at its spawn, out in the void, until Killcraft has
+			// them at their V1): nothing hurts them yet.
+			Long joined = JOINED.get(player.getUUID());
+			if (joined != null && System.currentTimeMillis() - joined < JOIN_GRACE_MS) {
+				return false;
+			}
+			// Players don't hurt each other unless the host allows it (Killcraft's PvP setting).
+			if (!pvp && source.getEntity() instanceof ServerPlayer attacker && attacker != player) {
+				return false;
+			}
+			// ULTRAKILL paused (in multiplayer, where the world doesn't wait): nothing hurts its player.
+			if (PAUSED.contains(player.getUUID())) {
+				return false;
+			}
+			// While ULTRAKILL has V1, Minecraft's player only follows it about: what would hurt it (mobs,
+			// lava, fire, falling into the void) hurts V1 instead.
+			if (FOLLOWING.contains(player.getUUID())) {
+				// (Not falling: V1 takes no fall damage, and a ground slam is a fall to Minecraft.)
+				if (!source.is(net.minecraft.tags.DamageTypeTags.IS_FALL)) {
+					float hurt = amount;
+					// Another player's sword or arrow (PvP): toned down for V1 (a full bow was half of
+					// V1's health, Power V nearly all), by the host's PvP damage.
+					if (source.getEntity() instanceof net.minecraft.world.entity.player.Player) {
+						hurt = Math.min(hurt * 0.4F, 7.0F) * pvpDamage;
+					}
+					// Who or what hit, and from where (the arrow, the sword's holder): V1 can parry it
+					// (punching it as it comes, as ULTRAKILL's parries), which sends it back at them.
+					net.minecraft.world.entity.Entity by = source.getEntity();
+					net.minecraft.world.phys.Vec3 from = source.getSourcePosition();
+					if (from == null && by != null) {
+						from = by.getEyePosition();
+					}
+					int byId = by != null && from != null ? by.getId() : 0;
+					PlayerLink.push(player, EV_FOLLOWER_HURT, hurt,
+						from != null ? (float) from.x : 0, from != null ? (float) from.y : 0, from != null ? (float) from.z : 0, byId);
+				}
 				return false;
 			}
 			return true;
 		});
 	}
 
+	private static final java.util.Map<UUID, Long> JOINED = new ConcurrentHashMap<>();
+	private static final long JOIN_GRACE_MS = 10_000;
+
+	/**
+	 * Players may hurt each other (the host's Killcraft PvP setting: from when Minecraft started, then
+	 * as the host's Killcraft says, changed in its pause menu).
+	 */
+	static volatile boolean pvp = Boolean.getBoolean("killcraft.pvp");
+
+	/** How hard players hit each other (the host's PvP damage, 1 as it comes). */
+	static volatile float pvpDamage = 1.0F;
+
+	/** This player's ULTRAKILL has V1 (Minecraft's player only follows it about). */
+	static boolean following(net.minecraft.world.entity.player.Player player) {
+		return FOLLOWING.contains(player.getUUID());
+	}
+
+	/** This player's ULTRAKILL is paused (their effects wait: PlayerEffectsMixin). */
+	public static boolean paused(net.minecraft.world.entity.player.Player player) {
+		return PAUSED.contains(player.getUUID());
+	}
+
 	private static int ticks;
 
 	private static final List<SkyLink.Actor> ACTORS = new ArrayList<>();
-	private static volatile boolean following;
+	private static final Set<UUID> FOLLOWING = ConcurrentHashMap.newKeySet();
+	private static final Set<UUID> PAUSED = ConcurrentHashMap.newKeySet();
 	private static boolean frozeIt;
 
 	private static void tick(MinecraftServer server) {
 		ticks++;
-		// What Killcraft publishes (as SkyCraft actors): V1's skulls, destruction to do, ...
+		// What the host's Killcraft publishes (as SkyCraft actors): V1's skulls, destruction to do, ...
+		// (Friends' come by packets: PlayerLink.)
 		boolean linked;
 		try {
 			linked = SkyLink.readActors(ACTORS);
@@ -140,32 +216,66 @@ public final class Killcraft implements ModInitializer {
 		if (!linked) {
 			ACTORS.clear();
 		}
-		// ULTRAKILL paused: Minecraft's world waits too (Killcraft says so; saying nothing, it doesn't).
+		// ULTRAKILL paused: alone, Minecraft's world waits too (Killcraft says so; saying nothing, it
+		// doesn't). With friends it can't wait for one player: that player is only kept safe.
+		boolean alone = server.getPlayerList().getPlayerCount() <= 1 && !server.isPublished();
 		boolean freeze = false;
-		for (SkyLink.Actor a : ACTORS) {
-			if (a.formId() == HeldItems.STATE_ID) {
-				freeze = a.width() > 0.5F;
+		for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+			List<SkyLink.Actor> actors = PlayerLink.actors(player, ACTORS);
+			boolean paused = false;
+			boolean host = PlayerLink.isHost(player);
+			for (SkyLink.Actor a : actors) {
+				if (a.formId() == HeldItems.STATE_ID) {
+					paused = a.width() > 0.5F;
+					// (The host's: its PvP setting, 2 on, 1 off; 0 from an older Killcraft, as it was.)
+					// (On, 2 and over: 2 plus its damage, 0 standing for 1, as an older Killcraft sent.)
+					if (host && a.height() > 0.5F) {
+						boolean want = a.height() > 1.5F;
+						float damage = want && a.height() > 2.05F ? Math.max(a.height() - 2.0F, 0.1F) : 1.0F;
+						if (want != pvp || Math.abs(damage - pvpDamage) > 0.01F) {
+							pvp = want;
+							pvpDamage = damage;
+							KillNet.roomsChanged();
+							LOG.info("Killcraft: PvP {} (damage {})", want ? "on" : "off", damage);
+						}
+					}
+				}
+			}
+			UUID id = player.getUUID();
+			if (paused) {
+				PAUSED.add(id);
+			} else {
+				PAUSED.remove(id);
+			}
+			freeze |= paused && alone;
+			HeldItems.tick(player, ticks, actors);
+			Destruction.tick(player, actors);
+			if (HeldItems.following(actors)) {
+				FOLLOWING.add(id);
+				player.resetFallDistance();
+			} else {
+				FOLLOWING.remove(id);
+			}
+			if (ticks % 5 == 0) {
+				PlayerLink.push(player, EV_DIMENSION, player.level().dimension() == net.minecraft.world.level.Level.NETHER ? 1 : 0, 0, 0, 0, 0);
+			}
+			// A Nether portal trip makes a new player: Killcraft must not be moving this one then
+			// (with the ULTRAKILL effect, or following V1).
+			if (player.level().getBlockState(player.blockPosition()).is(Blocks.NETHER_PORTAL)) {
+				PlayerLink.push(player, EV_ULTRAKILL_STOP, 0, 0, 0, 0, 0);
+			} else if (player.hasEffect(ULTRAKILL) && !player.isCreative() && !player.isSpectator() && ticks % 10 == 0) {
+				// (Not in creative or spectator: flying and noclip are Minecraft's.)
+				PlayerLink.push(player, EV_ULTRAKILL_MOVES, 0, 0, 0, 0, 0);
 			}
 		}
 		if (freeze != frozeIt) {
 			frozeIt = freeze;
 			server.tickRateManager().setFrozen(freeze);
 		}
-		for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-			HeldItems.tick(player, ticks, ACTORS);
-			Destruction.tick(player, ACTORS);
-			following = HeldItems.following(ACTORS);
-			if (ticks % 5 == 0) {
-				Link.push(EV_DIMENSION, player.level().dimension() == net.minecraft.world.level.Level.NETHER ? 1 : 0, 0, 0, 0, 0);
-			}
-			// A Nether portal trip makes a new player: Killcraft must not be moving this one then
-			// (with the ULTRAKILL effect, or following V1).
-			if (player.level().getBlockState(player.blockPosition()).is(Blocks.NETHER_PORTAL)) {
-				Link.push(EV_ULTRAKILL_STOP, 0, 0, 0, 0, 0);
-			} else if (player.hasEffect(ULTRAKILL) && !player.isCreative() && !player.isSpectator() && ticks % 10 == 0) {
-				// (Not in creative or spectator: flying and noclip are Minecraft's.)
-				Link.push(EV_ULTRAKILL_MOVES, 0, 0, 0, 0, 0);
-			}
+		// (Players who left: forgotten.)
+		if (ticks % 100 == 0) {
+			FOLLOWING.removeIf(id -> server.getPlayerList().getPlayer(id) == null);
+			PAUSED.removeIf(id -> server.getPlayerList().getPlayer(id) == null);
 		}
 	}
 

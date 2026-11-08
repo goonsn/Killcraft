@@ -16,6 +16,10 @@ import net.minecraft.world.level.Level;
  * ULTRAKILL) instead of SkyCraft. Killcraft turns SkyCraft's own off and passes the Killcraft
  * application's id (-Dskycraft.discordAppId=0, -Dkillcraft.discordAppId=...; see McSave).
  *
+ * <p>Multiplayer as SkyCraft's own status does it: while this world is open to friends (/host), or
+ * in a friend's world, the status has a Join button; a friend with Killcraft running who clicks it
+ * joins the same world (its e4mc link is the join secret), as with /join.
+ *
  * <p>Talks to the Discord app on this PC over its local IPC pipe (\\.\pipe\discord-ipc-N) from one
  * background thread, the way SkyCraft's DiscordPresence does (MIT, chasmlol). Without Discord running
  * it quietly retries now and then.
@@ -27,6 +31,12 @@ final class DiscordPresence {
 
 	private static volatile String wantedActivity;
 	private static long nextDescribe;
+	private static final java.util.regex.Pattern E4MC_LINK = java.util.regex.Pattern.compile("[a-z0-9-]+(?:\\.[a-z0-9-]+)*\\.e4mc\\.link",
+		java.util.regex.Pattern.CASE_INSENSITIVE);
+	// SkyCraft keeps this world's e4mc link (from e4mc's line in chat) for its own status: Killcraft's
+	// reads it there.
+	private static java.lang.reflect.Field skycraftHostLink;
+	private static boolean noHostLink;
 
 	private DiscordPresence() {
 	}
@@ -52,10 +62,29 @@ final class DiscordPresence {
 		}
 		nextDescribe = now + 1000;
 		JsonObject activity = null;
-		if (minecraft.player != null && minecraft.level != null) {
+		if (minecraft.player != null && minecraft.level != null && minecraft.getConnection() != null) {
+			var server = minecraft.getSingleplayerServer();
+			String hostLink = server != null && server.isPublished() ? hostLink() : null;
+			String friend = dev.skycraft.client.MirrorWorld.friendAddress(minecraft);
+			String where = minecraft.level.dimension() == Level.NETHER ? "In the Nether" : "In ULTRAKILL's levels";
 			activity = new JsonObject();
 			activity.addProperty("details", "Playing ULTRAKILL as a Minecraft player");
-			activity.addProperty("state", minecraft.level.dimension() == Level.NETHER ? "In the Nether" : "In ULTRAKILL's levels");
+			activity.addProperty("state", hostLink != null ? "Hosting a world · " + where : friend != null ? "In a friend's world · " + where : where);
+			String joinable = hostLink != null ? hostLink : friend != null && E4MC_LINK.matcher(friend).matches() ? friend : null;
+			if (joinable != null) {
+				// Anyone who can see the status may join the same world (its link is the secret).
+				int players = minecraft.getConnection().getOnlinePlayers().size();
+				JsonObject party = new JsonObject();
+				party.addProperty("id", "killcraft-" + Integer.toHexString(joinable.hashCode()));
+				com.google.gson.JsonArray size = new com.google.gson.JsonArray();
+				size.add(Math.max(players, 1));
+				size.add(server != null ? Math.max(server.getMaxPlayers(), players + 1) : Math.max(100, players + 1));
+				party.add("size", size);
+				activity.add("party", party);
+				JsonObject secrets = new JsonObject();
+				secrets.addProperty("join", joinable);
+				activity.add("secrets", secrets);
+			}
 			JsonObject timestamps = new JsonObject();
 			timestamps.addProperty("start", START);
 			activity.add("timestamps", timestamps);
@@ -68,6 +97,23 @@ final class DiscordPresence {
 		args.addProperty("pid", ProcessHandle.current().pid());
 		args.add("activity", activity);
 		wantedActivity = args.toString();
+	}
+
+	static String hostLink() {
+		if (noHostLink) {
+			return null;
+		}
+		try {
+			if (skycraftHostLink == null) {
+				skycraftHostLink = dev.skycraft.client.DiscordPresence.class.getDeclaredField("hostLink");
+				skycraftHostLink.setAccessible(true);
+			}
+			return (String) skycraftHostLink.get(null);
+		} catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+			noHostLink = true;
+			Killcraft.LOG.warn("Killcraft: can't read SkyCraft's world link ({}); no Join button on Discord", e.toString());
+			return null;
+		}
 	}
 
 	// ---- the IPC thread --------------------------------------------------------------------------
@@ -124,6 +170,12 @@ final class DiscordPresence {
 			while (System.currentTimeMillis() < deadline) {
 				JsonObject msg = readFrame();
 				if (msg != null && "READY".equals(str(msg, "evt"))) {
+					// (Friends clicking Join.)
+					JsonObject subscribe = new JsonObject();
+					subscribe.addProperty("cmd", "SUBSCRIBE");
+					subscribe.addProperty("nonce", Integer.toString(++nonce));
+					subscribe.addProperty("evt", "ACTIVITY_JOIN");
+					write(OP_FRAME, subscribe);
 					Killcraft.LOG.info("Killcraft: connected to Discord (Rich Presence)");
 					loggedNoDiscord = false;
 					sentActivity = null;
@@ -154,7 +206,13 @@ final class DiscordPresence {
 	private static void readAvailable() throws IOException {
 		JsonObject msg;
 		while ((msg = readFrame()) != null) {
-			if ("ERROR".equals(str(msg, "evt"))) {
+			if ("DISPATCH".equals(str(msg, "cmd")) && "ACTIVITY_JOIN".equals(str(msg, "evt")) && msg.has("data")) {
+				String secret = str(msg.getAsJsonObject("data"), "secret");
+				if (secret != null && E4MC_LINK.matcher(secret).matches()) {
+					Killcraft.LOG.info("Killcraft: joining {} from Discord", secret);
+					Minecraft.getInstance().execute(() -> dev.skycraft.client.MirrorWorld.joinFriend(Minecraft.getInstance(), secret));
+				}
+			} else if ("ERROR".equals(str(msg, "evt"))) {
 				Killcraft.LOG.warn("Killcraft: Discord says {}", msg.get("data"));
 			}
 		}

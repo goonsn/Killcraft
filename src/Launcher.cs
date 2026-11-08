@@ -67,6 +67,11 @@ namespace Killcraft
                     {
                         State = Status.SignIn;
                     }
+                    if (bundled && Plugin.PlayerSlot != 1 && !EnsureInstanceCopy(InstallDir))
+                    {
+                        State = Status.Failed;
+                        return;
+                    }
                     if (bundled)
                     {
                         McSave.Prepare(InstallDir);
@@ -80,6 +85,95 @@ namespace Killcraft
                     State = Status.Failed;
                 }
             }) { IsBackground = true, Name = "Killcraft launcher" }.Start();
+        }
+
+        // Player 2 (and up) on this PC: its own copy of SkyCraft's Prism instance (a Minecraft can only
+        // run once per instance), made on its first start and given SkyCraft's mods again on each.
+        // Its world, logs and screenshots are its own.
+        private static bool EnsureInstanceCopy(string dir)
+        {
+            string instances = Path.Combine(dir, "Prism", "instances");
+            string from = Path.Combine(instances, "SkyCraft");
+            string to = Path.Combine(instances, Plugin.InstanceName);
+            try
+            {
+                if (!Directory.Exists(from))
+                {
+                    Plugin.Log.LogError($"Minecraft: no {from} to copy for player {Plugin.PlayerSlot}; start Killcraft once normally first");
+                    return false;
+                }
+                if (!File.Exists(Path.Combine(to, "instance.cfg")))
+                {
+                    // Made outside Prism's instances and moved in finished: a running Prism takes in a
+                    // new instance as it appears (and saved the half-copied one's settings over it).
+                    Plugin.Log.LogInfo($"Minecraft: making {to} for player {Plugin.PlayerSlot}");
+                    string temp = Path.Combine(dir, "killcraft-instance-copy");
+                    if (Directory.Exists(temp))
+                    {
+                        Directory.Delete(temp, true);
+                    }
+                    CopyDir(from, temp, new[] { "saves", "logs", "crash-reports", "screenshots", "killcraft" });
+                    string cfg = Path.Combine(temp, "instance.cfg");
+                    var lines = new System.Collections.Generic.List<string>();
+                    foreach (string line in File.ReadAllLines(cfg))
+                    {
+                        if (line.StartsWith("uuid=") || line.StartsWith("lastLaunchTime=") || line.StartsWith("totalTimePlayed=") || line.StartsWith("lastTimePlayed="))
+                        {
+                            continue;
+                        }
+                        lines.Add(line.StartsWith("name=") ? "name=" + Plugin.InstanceName
+                            : line.StartsWith("notes=") ? $"notes=\"Killcraft's player {Plugin.PlayerSlot} on this PC (second-player.bat). A copy of SkyCraft's instance.\""
+                            : line);
+                    }
+                    File.WriteAllLines(cfg, lines);
+                    if (Directory.Exists(to))
+                    {
+                        Directory.Delete(to, true);
+                    }
+                    Directory.Move(temp, to);
+                }
+                string fromMods = Path.Combine(from, ".minecraft", "mods");
+                string toMods = Path.Combine(to, ".minecraft", "mods");
+                Directory.CreateDirectory(toMods);
+                foreach (string jar in Directory.GetFiles(toMods, "*.jar"))
+                {
+                    if (!File.Exists(Path.Combine(fromMods, Path.GetFileName(jar))))
+                    {
+                        File.Delete(jar);
+                    }
+                }
+                foreach (string jar in Directory.GetFiles(fromMods, "*.jar"))
+                {
+                    string target = Path.Combine(toMods, Path.GetFileName(jar));
+                    var a = new FileInfo(jar);
+                    if (!File.Exists(target) || new FileInfo(target).Length != a.Length || new FileInfo(target).LastWriteTimeUtc != a.LastWriteTimeUtc)
+                    {
+                        File.Copy(jar, target, true);
+                    }
+                }
+                return true;
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogError($"Minecraft: couldn't make {to}: {e}");
+                return false;
+            }
+        }
+
+        private static void CopyDir(string from, string to, string[] skip)
+        {
+            Directory.CreateDirectory(to);
+            foreach (string file in Directory.GetFiles(from))
+            {
+                File.Copy(file, Path.Combine(to, Path.GetFileName(file)), true);
+            }
+            foreach (string sub in Directory.GetDirectories(from))
+            {
+                if (Array.IndexOf(skip, Path.GetFileName(sub)) < 0)
+                {
+                    CopyDir(sub, Path.Combine(to, Path.GetFileName(sub)), skip);
+                }
+            }
         }
 
         // Unpacks the bundle into %LOCALAPPDATA%\SkyCraft (shared with SkyCraft itself, so the

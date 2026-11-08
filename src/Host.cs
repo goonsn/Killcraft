@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using UnityEngine;
 
 namespace Killcraft
@@ -21,6 +22,8 @@ namespace Killcraft
         private uint worldId;
         private string lastScene;
         private bool teleportPending = true;
+        // Further than this (blocks, across) from V1 is another level's part of Minecraft's world.
+        private const double OtherLevelBlocks = 1500;
         private bool needResync;
         private Vector3 lastSetRoot;
         private bool haveLastSet;
@@ -63,13 +66,25 @@ namespace Killcraft
 
         private void Update()
         {
+            Perf.Begin();
+            try
+            {
+                UpdateFrame();
+            }
+            finally
+            {
+                Perf.End(false);
+            }
+        }
+
+        private void UpdateFrame()
+        {
             Current = this;
             if (!Link.Ready)
             {
                 return;
             }
-            Link.Heartbeat();
-
+            { long kcT = Perf.Now(); Link.Heartbeat(); Perf.Add("Link.Heartbeat", kcT); }
             bool alive = Link.McAlive();
             // On a torn read (Minecraft mid-write) keep last frame's state, as SkyCraft does.
             McState fresh = default;
@@ -121,6 +136,16 @@ namespace Killcraft
             // Its first frames in the world can still carry a zero position: trust it after a moment.
             mcInWorld = inWorldNow && inWorldFor > 0.5f;
             screenOpen = haveMc && (mc.Flags & Proto.McScreenOpen) != 0;
+            // In a party played without Minecraft (its host plays multiplayer only): Minecraft's part of
+            // Killcraft is off for this player too (ULTRAKILL has V1, Minecraft frozen, its blocks unseen).
+            mcBanned = haveMc && !ServerList.MinecraftAllowed;
+            if (mcBanned && !mcDisabled)
+            {
+                mcDisabled = true;
+                everPuppet = false;
+                Plugin.Log.LogInfo("Minecraft turned off: this party is played without Minecraft");
+                ChatLines.Add("This party is played without Minecraft: Minecraft's off until you leave it");
+            }
 
             NewMovement nm = Find<NewMovement>();
             OptionsManager options = Find<OptionsManager>();
@@ -138,6 +163,11 @@ namespace Killcraft
             if (togglePressed && !(inGame && !paused && !(Patches.OwnsPlayer && Patches.McScreenOpen)))
             {
                 Plugin.Log.LogInfo($"{Plugin.ToggleKey.Value} pressed but ignored: in a level {inGame}, paused {paused}, a Minecraft screen open {Patches.OwnsPlayer && Patches.McScreenOpen}");
+            }
+            if (togglePressed && inGame && !paused && mcBanned)
+            {
+                ChatLines.Add("This party is played without Minecraft");
+                togglePressed = false;
             }
             if (togglePressed && inGame && !paused && !(Patches.OwnsPlayer && Patches.McScreenOpen))
             {
@@ -175,6 +205,13 @@ namespace Killcraft
                 Nether.LevelChanged();
                 SmileOs.LevelChanged();
                 HeldItems.LevelChanged();
+                RemotePlayers.LevelChanged();
+                UkThirdPerson.LevelChanged();
+                Pvp.LevelChanged();
+                EnemySync.LevelChanged();
+                WorldSync.LevelChanged();
+                Shots.LevelChanged();
+                SandboxSync.LevelChanged();
                 Plugin.Log.LogInfo($"level {scene} (world {worldId:X8}, Minecraft area offset {Coords.OffsetX}, {Coords.OffsetZ})");
                 // A new level with Minecraft's player still in the Nether: it comes out (and then to V1).
                 if (haveMc && mcInWorld && (Coords.InNether || (Time.unscaledTime - Combat.DimensionAt < 2f && Combat.DimensionNether)))
@@ -334,6 +371,17 @@ namespace Killcraft
             bool follow = Coords.InNether
                 ? !mcLeftInNether && !ultrakillTakes
                 : (puppet || (crossed && !ultrakillTakes)) && !teleportPending && mc.TeleportAck == teleportSeq;
+            // (Thousands of blocks off is another level's part of the world, never where V1 can be: a
+            // friend's server putting their player back where it joined, or a /tp to a player in
+            // another level. V1 followed there and fell out of its level, dying again and again.
+            // Minecraft's player is put back at V1 instead.)
+            bool otherLevel = !Coords.InNether && !crossed && (Math.Abs(mc.X - tx) > OtherLevelBlocks || Math.Abs(mc.Z - tz) > OtherLevelBlocks);
+            if (away && follow && otherLevel && !nm.dead && !mcDead && !ultrakillDrives)
+            {
+                Plugin.Log.LogInfo($"Minecraft's player was moved to ({mc.X:0.0}, {mc.Y:0.0}, {mc.Z:0.0}), another level's part of the world: put back at V1");
+                teleportPending = true;
+                follow = false;
+            }
             if (away && follow && !nm.dead && !mcDead && !ultrakillDrives)
             {
                 Plugin.Log.LogInfo($"Minecraft's player moved itself to ({mc.X:0.0}, {mc.Y:0.0}, {mc.Z:0.0}): V1 follows");
@@ -377,6 +425,12 @@ namespace Killcraft
                 // Somewhere else than it was put (an ender pearl, a portal, respawning): V1 goes there.
                 bool jumped = ultrakillDrives && ukTargetSet && teleportSeq == ukSeq && mc.TeleportAck == teleportSeq
                     && (Math.Abs(mc.X - ukX) > 4 || Math.Abs(mc.Y - ukY) > 4 || Math.Abs(mc.Z - ukZ) > 4);
+                if (jumped && !Coords.InNether && (Math.Abs(mc.X - ukX) > OtherLevelBlocks || Math.Abs(mc.Z - ukZ) > OtherLevelBlocks))
+                {
+                    Plugin.Log.LogInfo($"Minecraft's player was moved to ({mc.X:0.0}, {mc.Y:0.0}, {mc.Z:0.0}), another level's part of the world: put back at V1");
+                    teleportPending = true;
+                    jumped = false;
+                }
                 if (jumped)
                 {
                     Plugin.Log.LogInfo($"Minecraft's player moved itself to ({mc.X:0.0}, {mc.Y:0.0}, {mc.Z:0.0}): V1 follows");
@@ -452,11 +506,11 @@ namespace Killcraft
             }
             Patches.OwnsPlayer = controlled != null;
             // (A Minecraft screen open, as typing a command or the inventory: the keys are Minecraft's.)
-            Lockout.Frame(controlled != null, ultrakillDrives && !screenOpen);
-            HeldItems.Frame(controlled != null, nm != null ? nm.cc : null);
-            HurtZones.Frame(nm, controlled != null && nm != null && nm.rb != null && nm.rb.isKinematic && inGame && !loading);
+            { long kcT = Perf.Now(); Lockout.Frame(controlled != null, ultrakillDrives && !screenOpen); Perf.Add("Lockout.Frame", kcT); }
+            { long kcT = Perf.Now(); HeldItems.Frame(controlled != null, nm != null ? nm.cc : null); Perf.Add("HeldItems.Frame", kcT); }
+            { long kcT = Perf.Now(); HurtZones.Frame(nm, controlled != null && nm != null && nm.rb != null && nm.rb.isKinematic && inGame && !loading); Perf.Add("HurtZones.Frame", kcT); }
             // (Also when ULTRAKILL has V1 — toggled off, dead: Minecraft's mobs and TNT carry on otherwise.)
-            FreezeMinecraft(paused && inGame);
+            FreezeMinecraft((paused && inGame) || mcBanned);
             // The chat McCommand opens isn't a Minecraft screen the player has open: Esc still belongs to
             // ULTRAKILL's menu.
             Patches.McScreenOpen = screenOpen && !McCommand.Busy;
@@ -464,18 +518,64 @@ namespace Killcraft
             // (Respawning puts Minecraft's player at its spawn point: Killcraft's data pack keeps that
             // where the player last stood, so a death is a short move. See McSave.)
             InputForward.UltrakillMoves = ultrakillDrives && !screenOpen;
-            InputForward.Frame(controlled != null && puppet && !paused && !McCommand.Busy, screenOpen, Screen.width, Screen.height);
+            { long kcT = Perf.Now(); InputForward.Frame(controlled != null && puppet && !paused && !McCommand.Busy && !Typing.Active, screenOpen, Screen.width, Screen.height); Perf.Add("InputForward.Frame", kcT); }
             // (Also while Minecraft is on its way to V1, as through a Nether portal: no flash of ULTRAKILL's HUD.)
-            HudHider.Frame(controlled != null, nm);
+            { long kcT = Perf.Now(); HudHider.Frame(controlled != null, nm); Perf.Add("HudHider.Frame", kcT); }
             // (Before Combat publishes the damage requests MobHits makes.)
-            MobHits.Frame(mcDisabled && inGame && !loading && haveMc && mcInWorld && !nm.dead, haveMc ? Coords.ToUnity(mc.X, mc.Y, mc.Z) : Vector3.zero);
-            Combat.Frame(alive && inGame && mcInWorld && !mcDisabled, inGame && haveMc && mcInWorld, netherFree, nm);
+            { long kcT = Perf.Now(); MobHits.Frame(mcDisabled && inGame && !loading && haveMc && mcInWorld && !nm.dead, haveMc ? Coords.ToUnity(mc.X, mc.Y, mc.Z) : Vector3.zero); Perf.Add("MobHits.Frame", kcT); }
+            { long kcT = Perf.Now(); Combat.Frame(alive && inGame && mcInWorld && !mcDisabled, inGame && haveMc && mcInWorld, netherFree, nm); Perf.Add("Combat.Frame", kcT); }
+            // Multiplayer between ULTRAKILLs (KillNet): who else is in this level, and where.
+            KillNet.Receive((from, type, r) =>
+            {
+                // (A replay playing: the level's goings-on are the replay's, not the real ones.)
+                if (Replay.Playing && Replay.LevelType(type))
+                {
+                    return;
+                }
+                Dispatch(from, type, r);
+            });
+            DamageNumbers.Frame((mcDisabled || !haveMc) && inGame && !paused);
+            { long kcT = Perf.Now(); UkThirdPerson.Frame(mcDisabled || !haveMc, inGame, paused, cc); Perf.Add("UkThirdPerson.Frame", kcT); }
+            { long kcT = Perf.Now(); ShaderPack.Frame(inGame, paused, Patches.McScreenOpen || McCommand.Busy); Perf.Add("ShaderPack.Frame", kcT); }
+            bool netInLevel = inGame;
+            { long kcT = Perf.Now(); Room.Frame(worldId, netInLevel, mcDisabled || !haveMc, Coords.InNether); Perf.Add("Room.Frame", kcT); }
+            { long kcT = Perf.Now(); RemotePlayers.Frame(nm, nm != null ? nm.cc : null, netInLevel, mcDisabled || !haveMc); Perf.Add("RemotePlayers.Frame", kcT); }
+            { long kcT = Perf.Now(); EnemySync.Frame(); Perf.Add("EnemySync.Frame", kcT); }
+            { long kcT = Perf.Now(); SandboxSync.Frame(netInLevel && !loading); Perf.Add("SandboxSync.Frame", kcT); }
+            PlayerCollision.Frame(nm, netInLevel && !loading && !paused, mcDisabled || !haveMc);
+            OutOfMap.Frame(nm, netInLevel && !loading && !paused, mcDisabled || !haveMc);
+            { long kcT = Perf.Now(); WorldSync.Frame(RemotePlayers.Positions()); Perf.Add("WorldSync.Frame", kcT); }
+            { long kcT = Perf.Now(); Shots.Frame(); Perf.Add("Shots.Frame", kcT); }
+            Pvp.Frame();
+            {
+                long kcT = Perf.Now();
+                Typing.Frame();
+                ServerList.Frame();
+                DiscordRpc.Frame(inGame && !loading);
+                Profiles.Frame(nm, inGame && !loading, paused);
+                PartyChat.Frame();
+                PartyMenu.Frame(inGame, paused, mainMenu, loading);
+                OptionsTab.Frame();
+                Replays.Frame(mainMenu && !loading);
+                KillcraftPanel.Frame(inGame, paused, mainMenu, loading);
+                PartyHud.Frame(inGame && !loading, paused);
+                Spectate.Frame(inGame && !loading, paused);
+                Replay.Frame(inGame, loading, paused, nm);
+                ReplayPlayer.Frame(inGame, loading, paused);
+                PvpSetting.Frame();
+                ChatBox.Frame(inGame && !loading, paused, mcDisabled || !haveMc);
+                Skins.OwnFrame(inGame && !loading);
+                Perf.Add("Party", kcT);
+            }
+            { long kcT = Perf.Now(); Voice.Frame(Patches.McScreenOpen || McCommand.Busy || Typing.Active); Perf.Add("Voice", kcT); }
+            long kcEv = Perf.Now();
             while (Link.PopEvent(out McEvent e))
             {
                 Combat.Handle(e, nm);
             }
-            WorldRender.Drain();
-
+            Perf.Add("Minecraft's events", kcEv);
+            { long kcT = Perf.Now(); WorldRender.Drain(); Perf.Add("WorldRender.Drain", kcT); }
+            { long kcT = Perf.Now(); WorldRender.Relight(); Perf.Add("WorldRender.Relight", kcT); }
             var sky = new SkyState
             {
                 // While ULTRAKILL has V1 (intro drop, cutscene, death) Minecraft is told the world is
@@ -862,6 +962,19 @@ namespace Killcraft
 
         private void LateUpdate()
         {
+            Perf.Begin();
+            try
+            {
+                LateFrame();
+            }
+            finally
+            {
+                Perf.End(true);
+            }
+        }
+
+        private void LateFrame()
+        {
             if (!Link.Ready)
             {
                 return;
@@ -870,16 +983,20 @@ namespace Killcraft
             {
                 WorldRender.DebugCycle();
             }
-            Overlay.Frame(haveMc && mcInWorld && controlled != null && !mcFrozen && !McCommand.Busy);
-            WorldRender.Frame(haveMc && mcInWorld && inGame);
+            { long kcT = Perf.Now(); Overlay.Frame(haveMc && mcInWorld && controlled != null && !mcFrozen && !McCommand.Busy); Perf.Add("Overlay.Frame", kcT); }
+            { long kcT = Perf.Now(); WorldRender.Frame(haveMc && mcInWorld && inGame && !mcBanned); Perf.Add("WorldRender.Frame", kcT); }
             MoveV1();
             NewMovement v1 = Find<NewMovement>();
             bool v1InNether = inGame && Coords.InNether && v1 != null && Coords.IsNetherUnity(v1.transform.position);
-            Nether.Frame(v1InNether, v1 != null ? v1.cc : null);
-            NetherWorld.Frame(v1InNether && (puppet || netherFree) && !mcFrozen && !v1.dead, v1 != null ? v1.transform.position : Vector3.zero);
+            { long kcT = Perf.Now(); Nether.Frame(v1InNether, v1 != null ? v1.cc : null); Perf.Add("Nether.Frame", kcT); }
+            { long kcT = Perf.Now(); NetherWorld.Frame(v1InNether && (puppet || netherFree) && !mcFrozen && !v1.dead, v1 != null ? v1.transform.position : Vector3.zero); Perf.Add("NetherWorld.Frame", kcT); }
             ThirdPerson();
-            HeldItems.Pose(v1 != null ? v1.cc : null);
-            SmileOs.Frame(inGame && haveMc && mcInWorld);
+            { long kcT = Perf.Now(); UkThirdPerson.Place(); Spectate.Place(); ReplayPlayer.Place(); Perf.Add("UkThirdPerson.Place", kcT); }
+            { long kcT = Perf.Now(); ShaderPack.LateFrame(); Perf.Add("ShaderPack.LateFrame", kcT); }
+            { long kcT = Perf.Now(); HeldItems.Pose(v1 != null ? v1.cc : null); Perf.Add("HeldItems.Pose", kcT); }
+            { long kcT = Perf.Now(); EnemySync.LateFrame(); Perf.Add("EnemySync.LateFrame", kcT); }
+            { long kcT = Perf.Now(); RemotePlayers.LateFrame(); Perf.Add("RemotePlayers.LateFrame", kcT); }
+            { long kcT = Perf.Now(); SmileOs.Frame(inGame && haveMc && mcInWorld); Perf.Add("SmileOs.Frame", kcT); }
         }
 
         private void MoveV1()
@@ -943,7 +1060,7 @@ namespace Killcraft
             eye = mc.EyeHeight > 0f ? mc.EyeHeight : 1.62f;
         }
 
-        private bool mcDisabled, toggleRefused;
+        private bool mcDisabled, toggleRefused, mcBanned;
         private float toggleNotice;
         private UnityEngine.InputSystem.Key toggleKey = UnityEngine.InputSystem.Key.None;
 
@@ -964,7 +1081,7 @@ namespace Killcraft
                 }
             }
             bool pressed = false;
-            foreach (UnityEngine.InputSystem.InputDevice device in UnityEngine.InputSystem.InputSystem.devices)
+            foreach (UnityEngine.InputSystem.InputDevice device in Typing.Active ? new UnityEngine.InputSystem.InputDevice[0] : (System.Collections.Generic.IEnumerable<UnityEngine.InputSystem.InputDevice>)UnityEngine.InputSystem.InputSystem.devices)
             {
                 if (device is UnityEngine.InputSystem.Keyboard kb && kb.enabled && kb[toggleKey] is var control && control != null && control.wasPressedThisFrame)
                 {
@@ -1019,6 +1136,10 @@ namespace Killcraft
             {
                 return "Killcraft: couldn't create the shared memory (see BepInEx/LogOutput.log)";
             }
+            if (!mcWasAlive && !Plugin.WithMinecraft && Launcher.State == Launcher.Status.Off)
+            {
+                return null;  // (Minecraft off, as the launcher's MINECRAFT: OFF sets it: plain multiplayer, nothing to wait for.)
+            }
             if (!mcWasAlive)
             {
                 switch (Launcher.State)
@@ -1052,6 +1173,10 @@ namespace Killcraft
 
         private void OnGUI()
         {
+            // (The chat in a level: ChatBox.)
+            DamageNumbers.Gui();
+            Voice.Gui();
+
             string text = StatusText();
             if (text != null)
             {
@@ -1073,5 +1198,95 @@ namespace Killcraft
                 GUI.DrawTexture(new Rect(c.x, c.y, 8, 8), white);
             }
         }
+
+        // A KillNet message: to whatever it's for (a replay's messages come here too, as they came).
+        internal static void Dispatch(int from, byte type, BinaryReader r)
+        {
+                switch (type)
+                {
+                    case KillNet.Room:
+                        Room.Handle(r);
+                        break;
+                    case KillNet.PlayerState:
+                        RemotePlayers.Handle(from, r);
+                        break;
+                    case V1Body.Moves:
+                        RemotePlayers.HandleMove(from, r);
+                        break;
+                    case ChatLines.Line:
+                        ChatLines.AddFromMinecraft(r.ReadString());
+                        break;
+                    case Profiles.ProfileMessage:
+                    case Profiles.StatusMessage:
+                    case Profiles.PingMessage:
+                    case Profiles.PongMessage:
+                        Profiles.Handle(from, type, r);
+                        break;
+                    case Spectate.CheckpointMessage:
+                    case Spectate.ReviveMessage:
+                    case Spectate.LetInMessage:
+                        Spectate.Handle(from, type, r);
+                        break;
+                    case PvpSetting.Message:
+                        PvpSetting.Handle(from, r);
+                        break;
+                    case PartyChat.ChatMessage:
+                        PartyChat.Handle(from, r);
+                        break;
+                    case Party.PartyMessage:
+                        Party.HandleParty(r);
+                        break;
+                    case Party.GoingMessage:
+                        Party.HandleGoing(from, r);
+                        break;
+                    case Party.WorldMessage:
+                        Party.HandleWorld(r);
+                        break;
+                    case Shots.Fired:
+                        Shots.Handle(from, r);
+                        break;
+                    case RemotePlayers.HeldMessage:
+                        RemotePlayers.HandleItem(from, r);
+                        break;
+                    case WorldSync.Broke:
+                        WorldSync.Handle(r);
+                        break;
+                    case Voice.VoiceMessage:
+                        Voice.Handle(from, r);
+                        break;
+                    case Pvp.ShotParriedMessage:
+                        Pvp.HandleShotParried(from, r);
+                        break;
+                    case Pvp.BledMessage:
+                        Pvp.HandleBled(from, r);
+                        break;
+                    case Pvp.HitMessage:
+                    case Pvp.ParriedMessage:
+                        Pvp.Handle(from, type, r);
+                        break;
+                    case EnemySync.Snapshot:
+                    case EnemySync.Damage:
+                    case EnemySync.Died:
+                    case EnemySync.Woken:
+                    case EnemySync.Reset:
+                        EnemySync.Handle(from, type, r);
+                        break;
+                    case SandboxSync.Placed:
+                    case SandboxSync.Place:
+                    case SandboxSync.Removed:
+                    case SandboxSync.Moved:
+                    case SandboxSync.Want:
+                    case SandboxSync.Changed:
+                        SandboxSync.Handle(from, type, r);
+                        break;
+                    case ReplayPlayer.ControlMessage:
+                    case ReplayPlayer.OfferMessage:
+                    case ReplayPlayer.ChunkMessage:
+                    case ReplayPlayer.WantMessage:
+                        ReplayPlayer.Handle(from, type, r);
+                        break;
+                }
+        }
+
     }
 }

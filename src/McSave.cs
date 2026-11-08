@@ -18,10 +18,16 @@ namespace Killcraft
 
         public static void Prepare(string installDir)
         {
-            string game = Path.Combine(installDir, "Prism", "instances", "SkyCraft", ".minecraft");
+            string game = Path.Combine(installDir, "Prism", "instances", Plugin.InstanceName, ".minecraft");
             try
             {
-                SetDestruction(Path.Combine(game, "config", "skycraft.properties"), Plugin.DigIntoLevels.Value);
+                string props = Path.Combine(game, "config", "skycraft.properties");
+                SetDestruction(props, Plugin.DigIntoLevels.Value);
+                if (Plugin.PlayerSlot != 1)
+                {
+                    // A second player on this PC: into player 1's world (HostForSecondPlayer) as soon as it starts.
+                    SetProperty(props, "join", $"localhost:{Plugin.SecondPlayerPort}", "Killcraft's second player on this PC joins player 1's world.");
+                }
             }
             catch (Exception e)
             {
@@ -32,7 +38,8 @@ namespace Killcraft
             {
                 string app = Plugin.DiscordAppId.Value.Trim();
                 app = app.Length == 0 ? Plugin.KillcraftDiscordApp : app.Equals("skycraft", StringComparison.OrdinalIgnoreCase) ? "" : app;
-                SetDiscord(Path.Combine(installDir, "Prism", "instances", "SkyCraft", "instance.cfg"), app);
+                SetJvmArgs(Path.Combine(installDir, "Prism", "instances", Plugin.InstanceName, "instance.cfg"), app);
+                WriteLaunchProperties(Path.Combine(game, "config", "killcraft-launch.properties"), app);
             }
             catch (Exception e)
             {
@@ -205,9 +212,16 @@ namespace Killcraft
             }
         }
 
-        // The Discord status (Plugin.DiscordAppId): Killcraft's mod shows Killcraft's, with SkyCraft's own
-        // turned off; both are Java options in the Prism instance's settings.
-        private static void SetDiscord(string cfg, string appId)
+        // Java options in the Prism instance's settings:
+        //  - the Discord status (Plugin.DiscordAppId): Killcraft's mod shows Killcraft's, with SkyCraft's own
+        //    turned off;
+        //  - player 2 and up on this PC: their own link to their own ULTRAKILL (SkyCraft's skycraft.link);
+        //  - HostForSecondPlayer: the world opens to the second player by itself (Killcraft's mod);
+        //  - PvP: players in this world can hurt each other;
+        //  - where this ULTRAKILL listens for its Minecraft (KillNet: multiplayer between ULTRAKILLs).
+        private static readonly string[] OurJvmArgs = { "-Dskycraft.discordAppId=", "-Dkillcraft.discordAppId=", "-Dskycraft.link=", "-Dkillcraft.testHost=", "-Dkillcraft.pvp=", "-Dkillcraft.netPort=" };
+
+        private static void SetJvmArgs(string cfg, string appId)
         {
             if (!File.Exists(cfg))
             {
@@ -225,18 +239,29 @@ namespace Killcraft
                 var args = new List<string>();
                 foreach (string a in value.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries))
                 {
-                    if (!a.StartsWith("-Dskycraft.discordAppId=") && !a.StartsWith("-Dkillcraft.discordAppId="))
+                    if (Array.FindIndex(OurJvmArgs, a.StartsWith) < 0)
                     {
                         args.Add(a);
                     }
                 }
+                if (Plugin.PlayerSlot != 1)
+                {
+                    args.Add("-Dskycraft.link=" + Proto.MappingName);
+                }
+                else if (Plugin.HostForSecondPlayer.Value)
+                {
+                    args.Add("-Dkillcraft.testHost=" + Plugin.SecondPlayerPort);
+                }
+                if (Plugin.PvP.Value)
+                {
+                    args.Add("-Dkillcraft.pvp=true");
+                }
+                args.Add("-Dkillcraft.netPort=" + Plugin.NetPort);
+                // (The Discord status is ULTRAKILL's own now, DiscordRpc: SkyCraft's and Killcraft's mod's
+                // in Minecraft stay off, or they'd fight it.)
                 if (appId.Length > 0)
                 {
                     args.Add("-Dskycraft.discordAppId=0");
-                    if (appId != "0")
-                    {
-                        args.Add("-Dkillcraft.discordAppId=" + appId);
-                    }
                 }
                 string line = "JvmArgs=\"" + string.Join(" ", args) + "\"";
                 if (line != lines[i])
@@ -248,12 +273,68 @@ namespace Killcraft
             if (changed)
             {
                 File.WriteAllLines(cfg, lines);
-                Plugin.Log.LogInfo(appId.Length == 0 ? "Minecraft: Discord status is SkyCraft's" : appId == "0" ? "Minecraft: no Discord status" : "Minecraft: Discord status is Killcraft's");
+                Plugin.Log.LogInfo($"Minecraft: Java options now {lines[Array.FindIndex(lines, l => l.StartsWith("JvmArgs="))]}");
             }
         }
 
         // SkyCraft's "Skyrim destruction" setting (its pause menu button): mining and explosions dig
         // into the host's geometry. ULTRAKILL can't cut holes in its levels, so it's off by default.
+        // The same settings for Killcraft's mod to set itself, before SkyCraft or Killcraft read them
+        // (KillcraftPreLaunch): Prism rewrites its instance settings as it likes (a copy of the instance
+        // made while it ran lost its Java options), this file it leaves alone.
+        private static void WriteLaunchProperties(string file, string appId)
+        {
+            var props = new List<(string Key, string Value)> { ("skycraft.startHidden", "true") };
+            if (appId.Length > 0)
+            {
+                props.Add(("skycraft.discordAppId", "0"));
+            }
+            if (Plugin.PlayerSlot != 1)
+            {
+                props.Add(("skycraft.link", Proto.MappingName));
+            }
+            else if (Plugin.HostForSecondPlayer.Value)
+            {
+                props.Add(("killcraft.testHost", Plugin.SecondPlayerPort.ToString()));
+            }
+            if (Plugin.PvP.Value)
+            {
+                props.Add(("killcraft.pvp", "true"));
+            }
+            props.Add(("killcraft.netPort", Plugin.NetPort.ToString()));
+            var lines = new List<string> { "# Written by Killcraft (in ULTRAKILL) each time it starts this Minecraft: its settings. Don't edit." };
+            foreach (var (key, value) in props)
+            {
+                lines.Add(key + "=" + value.Replace("\\", "\\\\"));
+            }
+            Directory.CreateDirectory(Path.GetDirectoryName(file));
+            File.WriteAllLines(file, lines);
+        }
+
+        // One key=value line in SkyCraft's settings file (config/skycraft.properties).
+        private static void SetProperty(string file, string key, string value, string comment)
+        {
+            var lines = new List<string>(File.Exists(file) ? File.ReadAllLines(file) : new[] { "# SkyCraft" });
+            string line = key + "=" + value;
+            int at = lines.FindIndex(l => l.Trim().StartsWith(key + "="));
+            if (at >= 0 && lines[at].Trim() == line)
+            {
+                return;
+            }
+            if (at >= 0)
+            {
+                lines[at] = line;
+            }
+            else
+            {
+                lines.Add("# " + comment);
+                lines.Add(line);
+            }
+            Directory.CreateDirectory(Path.GetDirectoryName(file));
+            File.WriteAllLines(file, lines);
+            Plugin.Log.LogInfo($"Minecraft: {line} in {file}");
+        }
+
         private static void SetDestruction(string file, bool on)
         {
             var lines = new List<string>(File.Exists(file) ? File.ReadAllLines(file) : new[] { "# SkyCraft" });

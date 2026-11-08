@@ -130,7 +130,7 @@ namespace Killcraft
             ignoring.Clear();
             foreach (EnemyIdentifier eid in Object.FindObjectsOfType<EnemyIdentifier>())
             {
-                if (eid != null && !eid.ignorePlayer && !NetherWorld.IsOurs(eid))
+                if (eid != null && !eid.ignorePlayer && !NetherWorld.IsOurs(eid) && !Pvp.Is(eid))
                 {
                     eid.ignorePlayer = true;
                     ignoring.Add(eid);

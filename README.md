@@ -7,6 +7,17 @@
 
 It works like [SkyCraft](https://github.com/chasmlol/SkyCraft) (Minecraft inside Skyrim), and is built on it: a real Minecraft runs hidden in the background with SkyCraft's mod and Killcraft's own Minecraft mod, and ULTRAKILL shows Minecraft's player, HUD, blocks and items in its own world.
 
+## New in 2.0: multiplayer (KillNet)
+
+- **Play together over Steam.** PARTY in ULTRAKILL's main menu: HOST PARTY (name it, pick how many can join, public / friends / private, cheats on or off), JOIN BY CODE, PUBLIC LOBBIES, or a Steam invite. The party host picks the level and everyone goes there.
+- **The same level for everyone:** shared enemies and bosses (one health bar for all), doors, arenas, breakables, the Cybergrind's waves, and the sandbox's spawner arm (blocks, props and enemies anyone places).
+- **Voice chat** (push to talk, V; or an open mic) heard from where each V1 is, **text chat** (Enter in a level), player colours, a squad list with pings, **spectating** when you die, players bumping into each other (the host's choice), and being put back on solid ground if you fall out of the map.
+- **Replays:** every run is kept. REPLAYS in the main menu lists them with a CASE FILE (rank, damage, secrets, ...); watch them back from your own eyes, alone or together with the party.
+- **KillNet without Minecraft:** turn Minecraft off (`StartWithUltrakill = false`, or the launcher's MINECRAFT: OFF) and it's plain ULTRAKILL multiplayer, called KillNet. The `KillNet-<version>.zip` download is just that (no Minecraft files). Killcraft and KillNet players can play in the same party.
+- **The KillNet launcher** (`KillNet-Launcher-<version>.exe` under Releases): finds ULTRAKILL, installs BepInEx and Killcraft (or KillNet), keeps them and itself updated, and starts the game with or without Minecraft.
+- **Shaders** (K turns them on and off; sliders in the pause menu) and the KILLCRAFT panel in the pause menu (party, voice, replays, settings).
+- Your Discord status gets a Join button while you're in a party.
+
 ## What works
 
 - Minecraft movement and physics on ULTRAKILL's level geometry (walls, floors, slopes, doors).
@@ -42,6 +53,10 @@ You don't need SkyCraft or Skyrim: the Killcraft download already has SkyCraft's
 
 ## Install
 
+**Easiest:** download `KillNet-Launcher-<version>.exe` from **Releases** and run it. It finds ULTRAKILL, installs BepInEx and Killcraft, and keeps everything updated. MINECRAFT: ON/OFF picks Killcraft or KillNet.
+
+**By hand:**
+
 1. Download `Killcraft-<version>.zip` from this page's **Releases** and unzip it into `ULTRAKILL\BepInEx\plugins\`, so you have `ULTRAKILL\BepInEx\plugins\Killcraft\Killcraft.dll`. Leave `SkyCraft-Minecraft.zip` in that folder zipped.
 2. Start ULTRAKILL. Killcraft unpacks and starts Minecraft by itself (hidden). **The first time**, Prism Launcher asks you to sign in to your Microsoft account, and Minecraft and Java download (a few minutes).
 3. Start any level. After a moment Minecraft takes over V1.
@@ -56,6 +71,9 @@ Minecraft's own controls (WASD, space, shift, mouse buttons, 1-9, E for the inve
 |---|---|
 | **F9** | Turn Minecraft off (plain ULTRAKILL with your guns) and back on (if it does nothing, check your keyboard's Fn lock, or pick another key with `ToggleMinecraft`) |
 | **F5** | Third person (behind you, then in front, then back to first person) |
+| **K** | Shaders on and off |
+| **V** | Push to talk (in a party) |
+| **Enter** | Chat (in a level, in a party) |
 | **O** | Minecraft's menu (options, ...) |
 | **Esc** | ULTRAKILL's pause menu, which pauses Minecraft too and mutes its sound (or closes an open Minecraft screen) |
 
@@ -82,6 +100,10 @@ Minecraft's own controls (WASD, space, shift, mouse buttons, 1-9, E for the inve
 | `BlockBrightness` | `1.0` | How bright Minecraft blocks are drawn (lower it in dark levels) |
 | `UnitsPerBlock` | `2` | ULTRAKILL units per Minecraft block (2 makes the Minecraft player about V1's height) |
 | `StartWithUltrakill` | `true` | Start Minecraft when ULTRAKILL starts |
+| `PvP` | `false` | Players in your party can hurt each other (the host's setting; also on the KILLCRAFT page in OPTIONS) |
+| `PlayerCollision` | `true` | Players bump into each other (the host's setting) |
+| `OutOfMapRescue` | `true` | Falling out of the map puts you back on the last solid ground |
+| `PartyName` / `PartyMaxPlayers` / `PartyCheats` | | HOST PARTY's lobby name, size (2-10) and whether cheats can be on |
 | `ApplicationId` | (empty) | Your Discord status: empty shows Killcraft ("Playing ULTRAKILL as a Minecraft player"), `skycraft` SkyCraft's own, `0` none |
 
 ## Known limits
@@ -120,7 +142,9 @@ gradlew build
 
 The Killcraft build copies `mcmod/build/libs/killcraft-mc-*.jar` next to `Killcraft.dll` as `killcraft-mc.jar`, and Killcraft puts it into Minecraft's mods folder when it starts.
 
-The code: `Link.cs`/`Proto.cs` speak SkyCraft's shared-memory protocol, `Host.cs` hands V1 to Minecraft and back, `Collision.cs` streams ULTRAKILL's level geometry to Minecraft, `Combat.cs` mirrors enemies and applies hits, `WorldRender.cs` draws Minecraft's blocks, items and entities, `Overlay.cs` shows Minecraft's HUD, `InputForward.cs` sends the keyboard and mouse to Minecraft, `Nether.cs` makes ULTRAKILL look like the Nether while you're there, `NetherWorld.cs` gives the Nether's terrain collision, a navmesh and ULTRAKILL enemies, `McAudio.cs` mutes Minecraft while paused, `McSave.cs` prepares Minecraft's world (and writes Killcraft's data pack) before it starts, `HeldItems.cs` puts ULTRAKILL's skulls in Minecraft's inventory, `SmileOs.cs` stands ULTRAKILL's shop on SMILEOS blocks, `Destruction.cs` and `MobHits.cs` take ULTRAKILL's weapons to Minecraft's blocks and mobs, and `mcmod/` is Killcraft's Minecraft mod (the potion, the SMILEOS block, the skulls, and Minecraft's side of all that).
+The launcher (`launcher/app`, .NET Framework 4.8 WinForms): `cd launcher/app` then `dotnet build -c Release`. Its pictures come from `launcher/design` (`python art.py`, `python icon.py`; Pillow).
+
+The code: `Net/` is the multiplayer (`SteamNet.cs` the Steam P2P transport, `ServerList.cs` parties and codes, `EnemySync.cs`/`WorldSync.cs`/`SandboxSync.cs` the shared level, `Voice.cs`, `PartyChat.cs`, `Spectate.cs`), `Replay.cs`/`ReplayPlayer.cs`/`Replays.cs` the replays, `PartyMenu.cs`/`KillcraftPanel.cs` the party screen and panel, `Link.cs`/`Proto.cs` speak SkyCraft's shared-memory protocol, `Host.cs` hands V1 to Minecraft and back, `Collision.cs` streams ULTRAKILL's level geometry to Minecraft, `Combat.cs` mirrors enemies and applies hits, `WorldRender.cs` draws Minecraft's blocks, items and entities, `Overlay.cs` shows Minecraft's HUD, `InputForward.cs` sends the keyboard and mouse to Minecraft, `Nether.cs` makes ULTRAKILL look like the Nether while you're there, `NetherWorld.cs` gives the Nether's terrain collision, a navmesh and ULTRAKILL enemies, `McAudio.cs` mutes Minecraft while paused, `McSave.cs` prepares Minecraft's world (and writes Killcraft's data pack) before it starts, `HeldItems.cs` puts ULTRAKILL's skulls in Minecraft's inventory, `SmileOs.cs` stands ULTRAKILL's shop on SMILEOS blocks, `Destruction.cs` and `MobHits.cs` take ULTRAKILL's weapons to Minecraft's blocks and mobs, and `mcmod/` is Killcraft's Minecraft mod (the potion, the SMILEOS block, the skulls, and Minecraft's side of all that).
 
 ## Credits
 

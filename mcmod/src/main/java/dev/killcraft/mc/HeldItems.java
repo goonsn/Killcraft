@@ -91,7 +91,7 @@ final class HeldItems {
 			}
 		}
 		if (ticks % 2 == 0) {
-			Link.push(Killcraft.EV_HELD_SELECTED, typeOf(player.getMainHandItem()), 0, 0, 0, 0);
+			PlayerLink.push(player, Killcraft.EV_HELD_SELECTED, typeOf(player.getMainHandItem()), 0, 0, 0, 0);
 		}
 	}
 }

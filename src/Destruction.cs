@@ -14,7 +14,16 @@ namespace Killcraft
         private const uint RequestIds = 0x3FFFFE00;
         private const int RequestCount = 256;
         private const float PublishSeconds = 0.5f;
-        private const int KindExplosion = 1, KindTunnel = 2, KindDamage = 3, KindDig = 4, KindLeaveNether = 5, Fire = 0x100;
+        private const int KindExplosion = 1, KindTunnel = 2, KindDamage = 3, KindDig = 4, KindLeaveNether = 5, KindHeal = 6, Fire = 0x100;
+
+        // Healing Minecraft's player (Minecraft mode: V1 stood in blood), by amount of Minecraft's health.
+        public static void Heal(float amount)
+        {
+            if (amount > 0f)
+            {
+                Add(new ActorRecord { Width = amount, Level = KindHeal }, 0f, 0.2f);
+            }
+        }
 
         // (A class: an explosion's pieces are merged into one still being gathered.)
         private sealed class Request

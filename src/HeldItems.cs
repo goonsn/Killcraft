@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using HarmonyLib;
 using UnityEngine;
 
@@ -254,7 +254,9 @@ namespace Killcraft
             GhostArm = arm.gameObject;
             foreach (Renderer r in GhostArm.GetComponentsInChildren<Renderer>(true))
             {
-                if (r.enabled)
+                // (Not the skull's own: it's still in the hand here, and went invisible with the arm,
+                // only its light showing.)
+                if (r.enabled && (held == null || !r.transform.IsChildOf(held.transform)))
                 {
                     r.enabled = false;
                     hiddenRenderers.Add(r);

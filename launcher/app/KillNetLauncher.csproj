@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The KillNet launcher: a Windows app (.NET Framework 4.8, already on every Windows 10/11 PC) that
+       finds ULTRAKILL, installs BepInEx and KillNet/Killcraft from GitHub, keeps them updated and starts
+       the game with or without Minecraft. Looks like ULTRAKILL's main menu (design/mockup.py). -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>KillNet</AssemblyName>
+    <RootNamespace>KillNetLauncher</RootNamespace>
+    <Version>1.0.2</Version>
+    <Product>KillNet</Product>
+    <Company>goonsn</Company>
+    <Copyright>KillNet</Copyright>
+    <ApplicationIcon>Art\icon.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+    <Reference Include="System.Web.Extensions" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Art\bg.png" LogicalName="bg.png" />
+    <EmbeddedResource Include="Art\logo.png" LogicalName="logo.png" />
+    <EmbeddedResource Include="Art\figure.png" LogicalName="figure.png" />
+    <EmbeddedResource Include="Art\wires.txt" LogicalName="wires.txt" />
+    <EmbeddedResource Include="Art\icon.ico" LogicalName="icon.ico" />
+    <EmbeddedResource Include="..\design\fonts\VCR_OSD_Replayed.ttf" LogicalName="vcr.ttf" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="FONT-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

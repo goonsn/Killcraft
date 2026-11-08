@@ -6,7 +6,8 @@ namespace Killcraft
     {
         public const uint Magic = 0x43594B53;
         public const uint Version = 11;
-        public const string MappingName = "Local\\SkyCraft_v1";
+        // (Player 2 and up on this PC have their own: SkyCraft's -Dskycraft.link.)
+        public static string MappingName => Plugin.PlayerSlot == 1 ? "Local\\SkyCraft_v1" : $"Local\\SkyCraft_v1_p{Plugin.PlayerSlot}";
 
         public const long OffHeader = 0x0;
         public const long OffSkyState = 0x100;
@@ -72,6 +73,7 @@ namespace Killcraft
         // The skull in Minecraft's hand (ULTRAKILL's ItemType, or 0).
         public const uint EvKcUltrakillMoves = 100, EvKcUltrakillStop = 101, EvKcTerminal = 102, EvKcHeldSelected = 103,
             EvKcFollowerHurt = 104,
+            EvKcBled = 106,  // Minecraft's player hurt in Minecraft mode (A, Minecraft's), at B, C, D: it bleeds for the others
             EvKcDimension = 105;  // which world Minecraft's player is really in (A: 1 the Nether)  // Minecraft off: what would have hurt Minecraft's following player (A)
         public const uint HitCritical = 1, HitProjectile = 2, HitSweep = 4, HitFire = 8;
 

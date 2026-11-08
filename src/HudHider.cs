@@ -26,7 +26,7 @@ namespace Killcraft
             rescan -= Time.unscaledDeltaTime;
             if (rescan <= 0f)
             {
-                rescan = 1f;
+                rescan = 3f;
                 Collect(nm);
             }
             foreach (Behaviour b in targetBehaviours)

@@ -331,7 +331,24 @@ namespace Killcraft
         private static readonly List<EnemyIdentifier> spawned = new List<EnemyIdentifier>();
         private static readonly System.Random random = new System.Random();
 
-        private static SpawnableObject Pick(EnemyType? only = null)
+        // An enemy's prefab, as ULTRAKILL's list of enemies has it (Sandbox's spawner), or null.
+        public static GameObject PrefabFor(EnemyType type)
+        {
+            if (!LoadDatabase())
+            {
+                return null;
+            }
+            foreach (SpawnableObject o in database.enemies)
+            {
+                if (o != null && o.gameObject != null && o.enemyType == type)
+                {
+                    return o.gameObject;
+                }
+            }
+            return null;
+        }
+
+        private static bool LoadDatabase()
         {
             if (database == null && !databaseMissing)
             {
@@ -362,7 +379,12 @@ namespace Killcraft
                     Plugin.Log.LogWarning("Nether: ULTRAKILL's list of enemies isn't loaded, so no enemies in the Nether");
                 }
             }
-            if (database == null)
+            return database != null;
+        }
+
+        private static SpawnableObject Pick(EnemyType? only = null)
+        {
+            if (!LoadDatabase())
             {
                 return null;
             }

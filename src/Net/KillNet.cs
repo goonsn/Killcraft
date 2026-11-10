@@ -2,9 +2,11 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+#if !KILLNET_ONLY
 using System.Net;
 using System.Net.Sockets;
 using System.Threading;
+#endif
 
 namespace Killcraft
 {
@@ -23,6 +25,15 @@ namespace Killcraft
         public const byte Presence = 1, PlayerState = 2, Room = 100, HidePlayers = 200;
 
         private const int MaxFrame = 30000;
+#if KILLNET_ONLY
+        // (KillNet's own build: Steam only, no Minecraft to talk to.)
+        public static bool Connected => SteamNet.InLobby;
+        public static bool McConnected => false;
+
+        public static void Start()
+        {
+        }
+#else
         private static TcpListener listener;
         private static volatile NetworkStream stream;
         private static readonly object writeLock = new object();
@@ -105,11 +116,14 @@ namespace Killcraft
                 at += n;
             }
         }
+#endif
 
         // A message: type, route (ToPlayer: then the player's id), then what write puts.
         public static void Send(byte type, byte route, Action<BinaryWriter> write, int toPlayer = 0)
         {
+#if !KILLNET_ONLY
             NetworkStream s = stream;
+#endif
             // (A replay playing: its level isn't this player's to say anything of.)
             if (Replay.Playing && Replay.LevelType(type))
             {
@@ -118,7 +132,11 @@ namespace Killcraft
             bool record = Replay.Recording && Replay.Keeps(type) && route != ToPlayer && route != ToServer && route != ToMinecraft;
             // (Alone in the level: the level's goings-on are only kept for the replay, not sent.)
             bool solo = !Killcraft.Room.Shared && Replay.LevelType(type) && route != ToServer && route != ToMinecraft;
+#if KILLNET_ONLY
+            bool can = route != ToMinecraft && SteamNet.InLobby;
+#else
             bool can = route == ToMinecraft ? s != null : SteamNet.InLobby;
+#endif
             if ((!can || solo) && !record)
             {
                 return;
@@ -155,6 +173,7 @@ namespace Killcraft
                 SteamNet.Send(data);
                 return;
             }
+#if !KILLNET_ONLY
             try
             {
                 lock (writeLock)
@@ -168,6 +187,7 @@ namespace Killcraft
             {
                 stream = null;
             }
+#endif
         }
 
         // Main thread, each frame: what has arrived, to handle (from: the sender's id, -1 the server).
@@ -189,6 +209,7 @@ namespace Killcraft
             {
                 Plugin.Log.LogWarning($"KillNet: Steam failed ({e.Message})");
             }
+#if !KILLNET_ONLY
             while (inbox.TryDequeue(out byte[] data))
             {
                 // (From this PC's Minecraft: only what it says itself, -2. Its world's server's passing
@@ -198,6 +219,7 @@ namespace Killcraft
                     steamInbox.Enqueue(data);
                 }
             }
+#endif
             while (steamInbox.Count > 0)
             {
                 byte[] data = steamInbox.Dequeue();

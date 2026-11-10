@@ -40,11 +40,14 @@ namespace Killcraft
         private static TextMeshProUGUI partyName, codeText, infoText, squadHeader, chat, log, centerTitle;
         private static UiButton copy, back, settings, chatBox, privacy;
         private static float chatHeight = 796f;
-        private static readonly UiButton[] control = new UiButton[3];
+        private static readonly UiButton[] control = new UiButton[4];
         private static readonly UiButton[] voice = new UiButton[4];
         private static Image swatch, ownBlack;
         private static GameObject ownCode, ownFrame;
         private static UiButton playAlone;
+        // The party's game mode (its host's): NORMAL, or MINOS PRIME (MinosMode) and its settings.
+        private static UiButton modeButton;
+        private const int ModePopup = int.MinValue + 1;
         private static readonly List<GameObject> hiddenMenuParts = new List<GameObject>();
         private static RectTransform squad, servers, popup;
         private static GameObject squadView, serversView;
@@ -698,14 +701,15 @@ namespace Killcraft
             for (int i = 0; i < control.Length; i++)
             {
                 int n = i;
-                control[i] = Ui.Button(v, "", 32f, () => ControlClicked(n), 30f, 340f + i * 83f, 570f, 72f, TextAlignmentOptions.MidlineLeft);
+                control[i] = Ui.Button(v, "", 28f, () => ControlClicked(n), 30f, 332f + i * 67f, 570f, 60f, TextAlignmentOptions.MidlineLeft);
             }
+            modeButton = control[1];
             // (Over SELECT LEVEL: a level of this player's own, the party staying where it is.)
-            playAlone = Ui.Button(control[1].transform, "PLAY ALONE", 18f, () =>
+            playAlone = Ui.Button(control[2].transform, "PLAY ALONE", 18f, () =>
             {
                 Party.PlayAlone = true;
                 SelectLevel();
-            }, 418f, 17f, 138f, 38f, TextAlignmentOptions.Center, true, 3f);
+            }, 418f, 11f, 138f, 38f, TextAlignmentOptions.Center, true, 3f);
             playAlone.gameObject.SetActive(false);
 
             // Middle: the squad, or the open parties.
@@ -872,13 +876,20 @@ namespace Killcraft
                     ServerList.InviteOverlay();
                     break;
                 case 1:
-                    if (Party.IAmHost)
+                    ModeClicked();
+                    break;
+                case 2:
+                    if (Party.IAmHost && MinosMode.Selected)
+                    {
+                        MinosMode.HostStart();
+                    }
+                    else if (Party.IAmHost)
                     {
                         Party.PlayAlone = false;
                         SelectLevel();
                     }
                     break;
-                case 2:
+                case 3:
                     if (Party.OwnWorld)
                     {
                         ToggleServers();
@@ -1180,7 +1191,12 @@ namespace Killcraft
             // CONTROL.
             privacy.gameObject.SetActive(Party.OwnWorld);
             Control(0, Party.OwnWorld ? "INVITE FRIENDS" : "INVITE (OWNER ONLY)", Party.OwnWorld);
-            Control(1, Party.IAmHost ? "SELECT LEVEL" : "HOST PICKS THE LEVEL", Party.IAmHost);
+            bool minos = MinosMode.Selected;
+            string modeLabel = !minos ? "GAME MODE: NORMAL"
+                : !Party.IAmHost && MinosMode.PickMode == MinosMode.PickVolunteer ? (MinosMode.Volunteering ? "VOLUNTEERED AS MINOS" : "VOLUNTEER AS MINOS")
+                : "GAME MODE: MINOS PRIME";
+            Control(1, modeLabel, Party.IAmHost || (minos && MinosMode.PickMode == MinosMode.PickVolunteer), true, minos);
+            Control(2, minos ? (Party.IAmHost ? "START MINOS PRIME" : "HOST STARTS THE ROUND") : Party.IAmHost ? "SELECT LEVEL" : "HOST PICKS THE LEVEL", Party.IAmHost, true, minos);
             bool othersPlaying = false;
             foreach (Party.Member m in Party.Members)
             {
@@ -1195,7 +1211,7 @@ namespace Killcraft
             {
                 playAlone.gameObject.SetActive(alone);
             }
-            Control(2, Party.OwnWorld ? (showServers ? "SHOW SQUAD" : "BROWSE PARTIES") : "LEAVE PARTY", true, true, !Party.OwnWorld);
+            Control(3, Party.OwnWorld ? (showServers ? "SHOW SQUAD" : "BROWSE PARTIES") : "LEAVE PARTY", true, true, !Party.OwnWorld);
 
             // The middle.
             squadView.SetActive(!showServers);
@@ -1351,7 +1367,7 @@ namespace Killcraft
             }
             bool waking = PartyWake.Active;
             bool ok = waking && PartyWake.Ready(id);
-            r.Status.text = !waking ? StatusLine(i, me) : ok ? "<color=#FFFFFF>. . . OK</color>" : "WAIT FOR WAKE";
+            r.Status.text = (!waking ? StatusLine(i, me) : ok ? "<color=#FFFFFF>. . . OK</color>" : "WAIT FOR WAKE") + MinosMode.RowTag(id);
             Color glow = ok ? new Color(0.4f, 0.18f, 0.125f, 1f) : new Color(0.4f, 0.18f, 0.125f, 0f);
             r.Glow.color = Color.Lerp(r.Glow.color, glow, 0.5f);
             r.Ping.text = "";
@@ -1395,6 +1411,98 @@ namespace Killcraft
             }
         }
 
+        // MODE: the host's settings (NORMAL or MINOS PRIME; who's Minos, the rules, the lives), or anyone
+        // else's VOLUNTEER AS MINOS.
+        private static void ModeClicked()
+        {
+            if (!Party.IAmHost)
+            {
+                if (MinosMode.Selected && MinosMode.PickMode == MinosMode.PickVolunteer)
+                {
+                    MinosMode.ToggleVolunteer();
+                    refreshAt = 0f;
+                }
+                return;
+            }
+            if (popupFor == ModePopup && popup.gameObject.activeSelf)
+            {
+                popup.gameObject.SetActive(false);
+                popupFor = int.MinValue;
+                return;
+            }
+            ModeMenu();
+        }
+
+        private static void ModeMenu()
+        {
+            popupFor = ModePopup;
+            Ui.Clear(popup);
+            bool minos = MinosMode.Selected;
+            const float pw = 570f, modeH = 60f, settingH = 42f, gap = 8f;
+            var rows = new List<(string Label, Action Act, float H, bool Chosen)>
+            {
+                ("NORMAL\n<size=13><color=#9A9A9A>ULTRAKILL'S LEVELS, TOGETHER</color></size>", () => MinosMode.SetSelected(false), modeH, !minos),
+                ("MINOS PRIME\n<size=13><color=#9A9A9A>ONE OF YOU IS MINOS PRIME, THE REST ARE V1, IN HIS ARENA</color></size>", () => MinosMode.SetSelected(true), modeH, minos),
+            };
+            if (minos)
+            {
+                rows.Add(("WHO'S MINOS:  " + MinosMode.PickName(MinosMode.PickMode), MinosMode.CyclePick, settingH, false));
+                if (MinosMode.PickMode == MinosMode.PickVolunteer)
+                {
+                    rows.Add((MinosMode.Volunteering ? "I VOLUNTEER:  YES" : "I VOLUNTEER:  NO", MinosMode.ToggleVolunteer, settingH, false));
+                }
+                rows.Add(("RULES:  " + MinosMode.RulesName(MinosMode.RulesMode), MinosMode.CycleRules, settingH, false));
+                if (MinosMode.RulesMode == MinosMode.RulesShared)
+                {
+                    rows.Add(($"LIVES PER V1:  {MinosMode.LivesSetting}", MinosMode.CycleLives, settingH, false));
+                }
+            }
+            float h = 12f;
+            foreach (var row in rows)
+            {
+                h += row.H + gap;
+            }
+            if (minos)
+            {
+                h += 22f;  // (the settings' own line)
+            }
+            popup.sizeDelta = new Vector2(pw, h + 4f);
+            Ui.Sliced(Ui.Picture(Ui.Fill(popup, "Back"), Ui.BoxLineBlack, Color.white), 3f).raycastTarget = true;
+            float y = 12f;
+            for (int n = 0; n < rows.Count; n++)
+            {
+                var row = rows[n];
+                if (n == 2)
+                {
+                    Ui.Text(popup, "-- MINOS PRIME SETTINGS --", 15f, Ui.Grey, TextAlignmentOptions.MidlineLeft, 16f, y, pw - 32f, 18f);
+                    y += 22f;
+                }
+                Action act = row.Act;
+                string label = row.Chosen ? row.Label.Replace("#9A9A9A", "#FFE2DD") : row.Label;
+                UiButton b = Ui.Button(popup, label, row.H == modeH ? 22f : 18f, () =>
+                {
+                    act();
+                    refreshAt = 0f;
+                    ModeMenu();  // (stays open: its lines as they are now)
+                }, 12f, y, pw - 24f, row.H, TextAlignmentOptions.MidlineLeft, true, 2.5f);
+                if (row.Chosen)
+                {
+                    b.On = true;
+                    b.Accent = Ui.Red;
+                    b.TextOn = Color.white;
+                    b.Refresh();
+                }
+                y += row.H + gap;
+            }
+            // (Under GAME MODE, as wide as it.)
+            var corners = new Vector3[4];
+            ((RectTransform)modeButton.transform).GetWorldCorners(corners);
+            popup.position = corners[0];
+            popup.anchoredPosition += new Vector2(0f, -6f);
+            popup.SetAsLastSibling();
+            popup.gameObject.SetActive(true);
+        }
+
         // The ... menu for a player: make them host, kick them, mute them, their Steam profile.
         private static void More(int id)
         {
@@ -1423,6 +1531,10 @@ namespace Killcraft
             if (!me && member != null && Party.IAmHost && !member.WorldHost)
             {
                 items.Add(("KICK", () => Party.KickOut(member)));
+            }
+            if (Party.IAmHost && MinosMode.Selected && MinosMode.PickMode == MinosMode.PickHost)
+            {
+                items.Insert(0, (MinosMode.HostChoice == id ? "NOT MINOS" : "MAKE MINOS", () => MinosMode.HostPick(id)));
             }
             if (!me)
             {

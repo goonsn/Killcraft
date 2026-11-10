@@ -138,7 +138,8 @@ namespace Killcraft
             screenOpen = haveMc && (mc.Flags & Proto.McScreenOpen) != 0;
             // In a party played without Minecraft (its host plays multiplayer only): Minecraft's part of
             // Killcraft is off for this player too (ULTRAKILL has V1, Minecraft frozen, its blocks unseen).
-            mcBanned = haveMc && !ServerList.MinecraftAllowed;
+            // (A Minos Prime round too: everyone's V1, or Minos.)
+            mcBanned = haveMc && (!ServerList.MinecraftAllowed || MinosMode.Active);
             if (mcBanned && !mcDisabled)
             {
                 mcDisabled = true;
@@ -210,6 +211,7 @@ namespace Killcraft
                 Pvp.LevelChanged();
                 EnemySync.LevelChanged();
                 WorldSync.LevelChanged();
+                LevelEvents.LevelChanged();
                 Shots.LevelChanged();
                 SandboxSync.LevelChanged();
                 Plugin.Log.LogInfo($"level {scene} (world {worldId:X8}, Minecraft area offset {Coords.OffsetX}, {Coords.OffsetZ})");
@@ -520,7 +522,7 @@ namespace Killcraft
             InputForward.UltrakillMoves = ultrakillDrives && !screenOpen;
             { long kcT = Perf.Now(); InputForward.Frame(controlled != null && puppet && !paused && !McCommand.Busy && !Typing.Active, screenOpen, Screen.width, Screen.height); Perf.Add("InputForward.Frame", kcT); }
             // (Also while Minecraft is on its way to V1, as through a Nether portal: no flash of ULTRAKILL's HUD.)
-            { long kcT = Perf.Now(); HudHider.Frame(controlled != null, nm); Perf.Add("HudHider.Frame", kcT); }
+            { long kcT = Perf.Now(); HudHider.Frame(controlled != null || MinosMode.IAmMinos, nm); Perf.Add("HudHider.Frame", kcT); }
             // (Before Combat publishes the damage requests MobHits makes.)
             { long kcT = Perf.Now(); MobHits.Frame(mcDisabled && inGame && !loading && haveMc && mcInWorld && !nm.dead, haveMc ? Coords.ToUnity(mc.X, mc.Y, mc.Z) : Vector3.zero); Perf.Add("MobHits.Frame", kcT); }
             { long kcT = Perf.Now(); Combat.Frame(alive && inGame && mcInWorld && !mcDisabled, inGame && haveMc && mcInWorld, netherFree, nm); Perf.Add("Combat.Frame", kcT); }
@@ -532,6 +534,13 @@ namespace Killcraft
                 {
                     return;
                 }
+                // (Who's where and who's in the party: the party's owner's say (-1); this PC's Minecraft's
+                // own (-2): from no one else.)
+                if (((type == KillNet.Room || type == Party.PartyMessage) && from != -1)
+                    || ((type == Party.WorldMessage || type == ChatLines.Line) && from != -2))
+                {
+                    return;
+                }
                 Dispatch(from, type, r);
             });
             DamageNumbers.Frame((mcDisabled || !haveMc) && inGame && !paused);
@@ -540,6 +549,7 @@ namespace Killcraft
             bool netInLevel = inGame;
             { long kcT = Perf.Now(); Room.Frame(worldId, netInLevel, mcDisabled || !haveMc, Coords.InNether); Perf.Add("Room.Frame", kcT); }
             { long kcT = Perf.Now(); RemotePlayers.Frame(nm, nm != null ? nm.cc : null, netInLevel, mcDisabled || !haveMc); Perf.Add("RemotePlayers.Frame", kcT); }
+            { long kcT = Perf.Now(); MinosMode.Frame(nm, netInLevel, paused); Perf.Add("MinosMode.Frame", kcT); }
             { long kcT = Perf.Now(); EnemySync.Frame(); Perf.Add("EnemySync.Frame", kcT); }
             { long kcT = Perf.Now(); SandboxSync.Frame(netInLevel && !loading); Perf.Add("SandboxSync.Frame", kcT); }
             PlayerCollision.Frame(nm, netInLevel && !loading && !paused, mcDisabled || !haveMc);
@@ -994,7 +1004,8 @@ namespace Killcraft
             { long kcT = Perf.Now(); Nether.Frame(v1InNether, v1 != null ? v1.cc : null); Perf.Add("Nether.Frame", kcT); }
             { long kcT = Perf.Now(); NetherWorld.Frame(v1InNether && (puppet || netherFree) && !mcFrozen && !v1.dead, v1 != null ? v1.transform.position : Vector3.zero); Perf.Add("NetherWorld.Frame", kcT); }
             ThirdPerson();
-            { long kcT = Perf.Now(); UkThirdPerson.Place(); Spectate.Place(); ReplayPlayer.Place(); Perf.Add("UkThirdPerson.Place", kcT); }
+            { long kcT = Perf.Now(); UkThirdPerson.Place(); Spectate.Place(); ReplayPlayer.Place(); MinosControl.Place(); Perf.Add("UkThirdPerson.Place", kcT); }
+            { long kcT = Perf.Now(); Skins.OwnArms(); Perf.Add("Skins.OwnArms", kcT); }
             { long kcT = Perf.Now(); ShaderPack.LateFrame(); Perf.Add("ShaderPack.LateFrame", kcT); }
             { long kcT = Perf.Now(); HeldItems.Pose(v1 != null ? v1.cc : null); Perf.Add("HeldItems.Pose", kcT); }
             { long kcT = Perf.Now(); EnemySync.LateFrame(); Perf.Add("EnemySync.LateFrame", kcT); }
@@ -1243,6 +1254,13 @@ namespace Killcraft
                     case Party.GoingMessage:
                         Party.HandleGoing(from, r);
                         break;
+                    case MinosMode.SettingsMessage:
+                    case MinosMode.VolunteerMessage:
+                    case MinosMode.RoundMessage:
+                    case MinosMode.StateMessage:
+                    case MinosMode.AttackMessage:
+                        MinosMode.Handle(from, type, r);
+                        break;
                     case PartyWake.WakeMessage:
                         PartyWake.Handle(from, r);
                         break;
@@ -1257,6 +1275,9 @@ namespace Killcraft
                         break;
                     case WorldSync.Broke:
                         WorldSync.Handle(r);
+                        break;
+                    case LevelEvents.Message:
+                        LevelEvents.Handle(from, r);
                         break;
                     case Voice.VoiceMessage:
                         Voice.Handle(from, r);

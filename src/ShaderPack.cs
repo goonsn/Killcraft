@@ -515,7 +515,7 @@ namespace Killcraft
             string path = Path.Combine(Path.GetDirectoryName(typeof(Plugin).Assembly.Location), BundleName);
             if (!File.Exists(path))
             {
-                Plugin.Log.LogWarning($"shaders: no {BundleName} next to Killcraft.dll: off");
+                Plugin.Log.LogWarning($"shaders: no {BundleName} next to the plugin: off");
                 return false;
             }
             AssetBundle bundle = AssetBundle.LoadFromFile(path);

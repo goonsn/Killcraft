@@ -142,6 +142,8 @@ namespace Killcraft
             public int[] WeaponColors = new int[0];
             public string[] StyleNames = new string[0];
             public int[] StyleCounts = new int[0], StylePoints = new int[0];
+            // This player's own tags (the CASE FILE's TAGS; found by SEARCH).
+            public string UserTags = "";
 
             public DateTime When => new DateTime(Date, DateTimeKind.Local);
             public string Key => Path.GetFileNameWithoutExtension(File);
@@ -248,6 +250,7 @@ namespace Killcraft
                 case EnemySync.Snapshot:
                 case EnemySync.Died:
                 case EnemySync.Woken:
+                case LevelEvents.Message:
                     return true;
                 default:
                     return false;
@@ -281,6 +284,7 @@ namespace Killcraft
                 case SandboxSync.Moved:
                 case SandboxSync.Want:
                 case SandboxSync.Changed:
+                case LevelEvents.Message:
                     return true;
                 default:
                     return false;

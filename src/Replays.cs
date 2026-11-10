@@ -18,8 +18,9 @@ namespace Killcraft
         private static Canvas canvas;
         private static RectTransform page, list;
         private static TextMeshProUGUI empty;
-        private static UiButton search;
-        private static readonly object searchOwner = new object();
+        private static UiButton search, tagButton;
+        private static Replay.Info tagFor;
+        private static readonly object searchOwner = new object(), tagOwner = new object();
         private static string filter = "", shownKey = "", expanded = "", grow = "";
         // (Names with a thin dark edge, as UltraLink's: given it once the font is set.)
         private static readonly List<TextMeshProUGUI> outlined = new List<TextMeshProUGUI>();
@@ -68,7 +69,7 @@ namespace Killcraft
         // (Going into a replay: the menu isn't shown again on the way.)
         public static void CloseQuietly()
         {
-            if (Typing.Owner == searchOwner)
+            if (Typing.Owner == searchOwner || Typing.Owner == tagOwner)
             {
                 Typing.End();
             }
@@ -106,6 +107,7 @@ namespace Killcraft
             {
                 search.Set(filter.Length > 0 ? Typing.Escape(filter) : "<color=#666666><i>SEARCH...</i></color>");
             }
+            TagButtonText();
             if (Time.unscaledTime - listedAt > 3f)
             {
                 listedAt = Time.unscaledTime;
@@ -163,6 +165,7 @@ namespace Killcraft
             {
                 t.Append(' ').Append(m);
             }
+            t.Append(' ').Append(i.UserTags ?? "");
             return t.ToString().ToUpperInvariant();
         }
 
@@ -432,6 +435,16 @@ namespace Killcraft
                 Ui.Label(Ui.Fill(chip, "Text"), tag, 12f, Color.white, TextAlignmentOptions.Midline);
                 cx += w + 7f;
             }
+            // Tags of this player's own: typed here, found by SEARCH.
+            tagFor = i;
+            tagButton = Ui.Button(row, "", 12f, () =>
+            {
+                if (Typing.Owner != tagOwner)
+                {
+                    Typing.Begin(tagOwner, 80, t => SaveTags(i, t), i.UserTags ?? "");
+                }
+            }, cx, y0 + 12f, Mathf.Max(140f, RowW - 20f - cx), 23f, TextAlignmentOptions.MidlineLeft, true, 2f);
+            TagButtonText();
             // Health through the run: the marks' names in the band along its top, each cut short
             // where the next begins.
             Header(row, 20f, y0 + 44f, "RUN PULSE", "HP");
@@ -470,6 +483,33 @@ namespace Killcraft
         }
 
         private static string Short(float t) => t < 60f ? $"{(int)t}S" : Replay.Clock(t);
+
+        private static void TagButtonText()
+        {
+            if (tagButton == null || tagFor == null)
+            {
+                return;
+            }
+            string tags = tagFor.UserTags ?? "";
+            tagButton.Set(Typing.Owner == tagOwner ? "TAGS: " + Typing.Shown("TYPE, THEN ENTER")
+                : tags.Length > 0 ? "TAGS: " + Typing.Escape(tags.ToUpperInvariant()) : "<color=#777777>+ TAGS</color>");
+        }
+
+        // Saved beside the replay (its .json).
+        private static void SaveTags(Replay.Info i, string t)
+        {
+            i.UserTags = (t ?? "").Trim();
+            try
+            {
+                File.WriteAllText(i.Meta, JsonUtility.ToJson(i, true));
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogWarning($"replays: couldn't save the tags ({e.Message})");
+            }
+            listedAt = -100f;
+            shownKey = "";
+        }
 
         private static void Header(RectTransform row, float x, float y, string a, string b)
         {

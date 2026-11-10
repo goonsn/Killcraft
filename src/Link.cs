@@ -4,35 +4,6 @@ using System.Threading;
 
 namespace Killcraft
 {
-    internal struct McState
-    {
-        public uint Flags;
-        public double X, Y, Z;
-        public float Yaw, Pitch, EyeHeight, Sensitivity;
-        public uint TeleportAck, GuiScale;
-        public ulong FrameCounter;
-        public float Fov;
-        public double EyeX, EyeY, EyeZ;
-        public long TickQpc;
-        public double PrevX, PrevY, PrevZ, CurX, CurY, CurZ;
-        public float TickEyeO, TickEye, TickMs;
-        public uint CameraMode;
-        public float CameraDistance;
-    }
-
-    internal struct SkyState
-    {
-        public uint Flags, WorldId, Epoch, TeleportSeq, ViewportW, ViewportH;
-        public double X, Y, Z;
-        public float Yaw, Pitch, GameHour;
-    }
-
-    internal struct McEvent
-    {
-        public uint Type, FormId, Flags, Weapon;
-        public float A, B, C, D;
-    }
-
     // The host end of SkyCraft's shared memory. ULTRAKILL plays the part Skyrim's SKSE plugin plays:
     // it creates the mapping, and SkyCraft's Minecraft mod opens it.
     internal static unsafe class Link

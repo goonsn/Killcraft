@@ -2265,6 +2265,11 @@ namespace Killcraft
                     {
                         return;
                     }
+                    if (!SafeKey(key) || meta <= 0 || kcr <= 0 || png < 0 || (long)meta + kcr + png > MaxShared)
+                    {
+                        Plugin.Log.LogWarning($"replay: {Profiles.NameOf(from)} offered a replay that can't be one ({key.Length} letters, {(long)meta + kcr + png} bytes); not taken");
+                        return;
+                    }
                     if (!InMenu())
                     {
                         PartyChat.System($"{Typing.Escape(Profiles.NameOf(from))} is watching a replay with the party ({Typing.Escape(level)}): back in the menu to join.");
@@ -2304,7 +2309,7 @@ namespace Killcraft
                     int at = r.ReadInt32();
                     int n = r.ReadUInt16();
                     byte[] data = r.ReadBytes(n);
-                    if (incoming == null || key != incomingKey || from != incomingFrom || at + n > incoming.Length)
+                    if (incoming == null || key != incomingKey || from != incomingFrom || at < 0 || at + n > incoming.Length)
                     {
                         return;
                     }
@@ -2348,6 +2353,14 @@ namespace Killcraft
                 }
             }
         }
+
+        // (A replay sent: 64 MB at most; its name a file's name, nothing of a folder in it.)
+        private const long MaxShared = 64L * 1024 * 1024;
+
+        private static bool SafeKey(string key) =>
+            !string.IsNullOrEmpty(key) && key.Length <= 120 && key.Trim() == key && !key.StartsWith(".", StringComparison.Ordinal)
+            && key.IndexOfAny(Path.GetInvalidFileNameChars()) < 0 && key.IndexOf("..", StringComparison.Ordinal) < 0
+            && Path.GetFileName(key) == key;
 
         private static bool InMenu()
         {

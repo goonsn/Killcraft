@@ -164,6 +164,10 @@ namespace Killcraft
         public static void HandleGoing(int from, BinaryReader r)
         {
             string scene = r.ReadString();
+            if (!FromHost(from))
+            {
+                return;
+            }
             string who = NameOf(from);
             if (!Plugin.FollowHost.Value)
             {
@@ -188,6 +192,24 @@ namespace Killcraft
             Plugin.Log.LogInfo($"party: {who} took everyone to {scene}: going");
             ChatLines.Add($"{who} took the party to {LevelName(scene)}");
             Load(scene);
+        }
+
+        // From the party's host (or nobody's known as it yet: just joined).
+        public static bool FromHost(int id)
+        {
+            bool known = false;
+            foreach (Member m in Members)
+            {
+                if (m.PartyHost)
+                {
+                    known = true;
+                    if (m.Id == id)
+                    {
+                        return true;
+                    }
+                }
+            }
+            return !known;
         }
 
         public static string NameOf(int id)

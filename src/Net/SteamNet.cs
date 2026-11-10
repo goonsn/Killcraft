@@ -270,7 +270,7 @@ namespace Killcraft
         private static P2PSend HowFor(byte type, int length)
         {
             // (What's said again many times a second, newest wins: not held up by a lost one.)
-            bool often = type == KillNet.PlayerState || type == V1Body.Moves || type == EnemySync.Snapshot || type == Voice.VoiceMessage;
+            bool often = type == KillNet.PlayerState || type == V1Body.Moves || type == EnemySync.Snapshot || type == Voice.VoiceMessage || type == MinosMode.StateMessage;
             return often && length <= 1100 ? P2PSend.UnreliableNoDelay : P2PSend.Reliable;
         }
 

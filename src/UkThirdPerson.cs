@@ -43,12 +43,13 @@ namespace Killcraft
         // Each frame (Update): the key, and whether third person can be on now (a level, ULTRAKILL mode).
         public static void Frame(bool ultrakillMode, bool inGame, bool paused, CameraController camera)
         {
-            if (ultrakillMode && inGame && !paused && !Spectate.Active && !ReplayPlayer.Active && !Typing.Active && Pressed())
+            if (ultrakillMode && inGame && !paused && !Spectate.Active && !ReplayPlayer.Active && !Typing.Active && !MinosMode.IAmMinos && Pressed())
             {
                 mode = (mode + 1) % 3;
                 Plugin.Log.LogInfo($"third person: {(mode == 0 ? "off" : mode == 1 ? "from behind" : "from the front")}");
             }
-            bool want = mode != 0 && ultrakillMode && inGame && camera != null && camera.cam != null;
+            // (Not as Minos Prime: his own camera, MinosControl.)
+            bool want = mode != 0 && ultrakillMode && inGame && camera != null && camera.cam != null && !MinosMode.IAmMinos;
             if (want && !on)
             {
                 Start(camera);
@@ -135,7 +136,7 @@ namespace Killcraft
             return key.ToString().ToUpperInvariant();
         }
 
-        private static bool Pressed()
+        internal static bool Pressed()
         {
             if (key == UnityEngine.InputSystem.Key.None
                 && (!Enum.TryParse(Plugin.ThirdPersonKey.Value, true, out key) || key == UnityEngine.InputSystem.Key.None))

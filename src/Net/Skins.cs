@@ -234,6 +234,79 @@ namespace Killcraft
             body.R.sharedMaterials = mats;
         }
 
+        // Copies of looks nobody wears now (a colour tried on the wheel, a player gone): freed a few
+        // seconds later, when nothing shows them any more.
+        private static readonly List<(UnityEngine.Object Obj, float At)> stale = new List<(UnityEngine.Object, float)>();
+
+        private static void Prune(Profiles.Info also)
+        {
+            if (recoloured.Count + retextured.Count < 24)
+            {
+                return;
+            }
+            var looks = new HashSet<string>();
+            var paints = new HashSet<string>();
+            void Worn(Profiles.Info i)
+            {
+                looks.Add(LookKey(i));
+                paints.Add(K(i.Body) + "|" + K(i.Lights));
+                paints.Add(K(i.Body) + "|-");  // (the wings': their lights left)
+            }
+            Worn(also);
+            Worn(ownLook);
+            foreach (Profiles.Info i in Profiles.All())
+            {
+                Worn(i);
+            }
+            var drop = new List<string>();
+            foreach (var kv in recoloured)
+            {
+                if (!looks.Contains(kv.Key.Substring(kv.Key.IndexOf('|') + 1)))
+                {
+                    drop.Add(kv.Key);
+                }
+            }
+            foreach (string k in drop)
+            {
+                if (recoloured[k] != null)
+                {
+                    stale.Add((recoloured[k], Time.unscaledTime));
+                }
+                recoloured.Remove(k);
+            }
+            drop.Clear();
+            foreach (var kv in retextured)
+            {
+                if (!paints.Contains(kv.Key.Substring(kv.Key.IndexOf('|') + 1)))
+                {
+                    drop.Add(kv.Key);
+                }
+            }
+            foreach (string k in drop)
+            {
+                if (retextured[k] != null)
+                {
+                    stale.Add((retextured[k], Time.unscaledTime));
+                }
+                retextured.Remove(k);
+            }
+        }
+
+        private static void Bury()
+        {
+            for (int i = stale.Count - 1; i >= 0; i--)
+            {
+                if (Time.unscaledTime - stale[i].At > 3f)
+                {
+                    if (stale[i].Obj != null)
+                    {
+                        UnityEngine.Object.Destroy(stale[i].Obj);
+                    }
+                    stale.RemoveAt(i);
+                }
+            }
+        }
+
         private static Material Recolour(Material m, Profiles.Info who)
         {
             if (m == null)
@@ -246,6 +319,7 @@ namespace Killcraft
             {
                 return done;
             }
+            Prune(who);
             var copy = new Material(m) { name = m.name + " (Killcraft look)" };
             try
             {
@@ -309,6 +383,133 @@ namespace Killcraft
             read.name = tex.name + " (Killcraft look)";
             retextured[key] = read;
             return read;
+        }
+
+        // ---- this player's own arms in first person, in their V1's colour ----
+        // The arm holding the guns (T_MainArm, in each gun's model), the Feedbacker (T_Feedbacker) and
+        // the blue arm (Blue Arm): their blue plates as V1's body's are. The whiplash's green arm, the
+        // Knuckleblaster and the guns themselves keep their own colours.
+        private static readonly HashSet<string> ArmTextures = new HashSet<string> { "T_MainArm", "T_Feedbacker", "Blue Arm" };
+        private static readonly Dictionary<Renderer, (Material[] Original, Material[] Shown)> arms = new Dictionary<Renderer, (Material[], Material[])>();
+        private static readonly Profiles.Info ownLook = new Profiles.Info();
+        private static readonly List<Renderer> found = new List<Renderer>();
+        private static string armsKey;
+        private static float armsAt = -100f;
+
+        public static void OwnArms()
+        {
+            Bury();
+            ownLook.Body = Profiles.ParseColor(Plugin.BodyColour.Value);
+            ownLook.Lights = Profiles.ParseColor(Plugin.LightsColour.Value);
+            ownLook.Wings = Profiles.ParseColor(Plugin.WingsColour.Value);
+            string key = LookKey(ownLook);
+            float now = Time.unscaledTime;
+            // (Each half second: a gun picked up or an arm switched to is a new model.)
+            if (key == armsKey && now - armsAt < 0.5f)
+            {
+                return;
+            }
+            armsKey = key;
+            armsAt = now;
+            try
+            {
+                found.Clear();
+                GunControl gc = MonoSingleton<GunControl>.Instance;
+                FistControl fc = MonoSingleton<FistControl>.Instance;
+                if (gc != null)
+                {
+                    found.AddRange(gc.GetComponentsInChildren<Renderer>(true));
+                }
+                if (fc != null)
+                {
+                    found.AddRange(fc.GetComponentsInChildren<Renderer>(true));
+                }
+                var gone = new List<Renderer>();
+                foreach (Renderer r in arms.Keys)
+                {
+                    if (r == null)
+                    {
+                        gone.Add(r);
+                    }
+                }
+                foreach (Renderer r in gone)
+                {
+                    arms.Remove(r);
+                }
+                bool plain = Plain(ownLook);
+                foreach (Renderer r in found)
+                {
+                    if (r == null || !(r is SkinnedMeshRenderer || r is MeshRenderer))
+                    {
+                        continue;
+                    }
+                    Material[] has = r.sharedMaterials;
+                    arms.TryGetValue(r, out var was);
+                    // (Its materials as ours left them, or new ones ULTRAKILL put on since.)
+                    Material[] original = was.Shown != null && Same(has, was.Shown) ? was.Original : has;
+                    if (!AnyArm(original))
+                    {
+                        arms.Remove(r);
+                        continue;
+                    }
+                    Material[] want = original;
+                    if (!plain)
+                    {
+                        want = new Material[original.Length];
+                        for (int i = 0; i < original.Length; i++)
+                        {
+                            want[i] = IsArm(original[i]) ? Recolour(original[i], ownLook) : original[i];
+                        }
+                    }
+                    if (!Same(has, want))
+                    {
+                        r.sharedMaterials = want;
+                    }
+                    arms[r] = (original, want);
+                }
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogWarning($"skins: couldn't colour the arms ({e.Message})");
+            }
+        }
+
+        private static bool IsArm(Material m)
+        {
+            if (m == null || !m.HasProperty("_MainTex"))
+            {
+                return false;
+            }
+            Texture t = m.GetTexture("_MainTex");
+            return t != null && ArmTextures.Contains(t.name);
+        }
+
+        private static bool AnyArm(Material[] ms)
+        {
+            foreach (Material m in ms)
+            {
+                if (IsArm(m))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static bool Same(Material[] a, Material[] b)
+        {
+            if (a == null || b == null || a.Length != b.Length)
+            {
+                return false;
+            }
+            for (int i = 0; i < a.Length; i++)
+            {
+                if (a[i] != b[i])
+                {
+                    return false;
+                }
+            }
+            return true;
         }
 
         // A pixel's shade kept, in the colour asked for.

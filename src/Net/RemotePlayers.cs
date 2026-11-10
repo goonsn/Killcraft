@@ -178,7 +178,7 @@ namespace Killcraft
             {
                 Remote r = each.Value;
                 Pose(each.Key, r);
-                bool alive = (r.Flags & FlagDead) == 0 && Time.unscaledTime - r.At < 1f;
+                bool alive = (r.Flags & FlagDead) == 0 && Time.unscaledTime - r.At < 1f && !MinosMode.IsMinos(each.Key);
                 // (Where they're drawn: their V1 body, or their Minecraft player, where Minecraft has it.)
                 bool asV1 = (r.Flags & FlagUltrakill) != 0;
                 Vector3 drawn = r.Body != null && r.Body.activeSelf ? r.Shown : r.Feet + r.Velocity * Mathf.Min(Time.unscaledTime - r.At, 0.1f);
@@ -658,7 +658,8 @@ namespace Killcraft
 
         private static void Pose(int id, Remote r)
         {
-            bool show = (r.Flags & FlagUltrakill) != 0 && (r.Flags & FlagDead) == 0 && Time.unscaledTime - r.At < 1.5f;
+            // (A Minos Prime round's Minos player: their V1's put away, Minos is what's seen of them.)
+            bool show = (r.Flags & FlagUltrakill) != 0 && (r.Flags & FlagDead) == 0 && Time.unscaledTime - r.At < 1.5f && !MinosMode.IsMinos(id);
             if (show && r.Body == null)
             {
                 r.V1 = V1Body.Make();
@@ -1240,8 +1241,19 @@ namespace Killcraft
             return false;
         }
 
+        // A player as this game's enemies go after them (their marker), if they're here and alive.
+        public static EnemyTarget TargetOf(int id)
+        {
+            return remotes.TryGetValue(id, out Remote r) && r.Target != null && r.Marker != null && r.Marker.activeSelf ? r.Target : null;
+        }
+
         public static bool HeadOf(int id, out Vector3 at)
         {
+            // (A Minos Prime round's Minos player: his head.)
+            if (MinosMode.IsMinos(id) && MinosControl.HeadOf(out at))
+            {
+                return true;
+            }
             if (remotes.TryGetValue(id, out Remote r) && r.Placed && r.Body != null && Time.unscaledTime - r.At < 3f)
             {
                 at = r.Shown + Vector3.up * (1.6f * Coords.U);

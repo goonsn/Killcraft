@@ -730,6 +730,11 @@ namespace Killcraft
             {
                 items.Add(("MAKE HOST", () => Party.MakeHost(member)));
             }
+            // (Minos Prime here, in this level: the host's, anyone.)
+            if (MinosMode.CanFree && (member != null || me))
+            {
+                items.Add((MinosMode.Free && MinosMode.MinosId == id ? "BACK TO V1" : "TURN INTO MINOS", () => MinosMode.HostFree(id)));
+            }
             if (!me && member != null && Party.IAmHost && !member.WorldHost)
             {
                 items.Add(("KICK", () => Party.KickOut(member)));
@@ -969,9 +974,7 @@ namespace Killcraft
             Section(list, "SPECTATING", "Through their eyes; with this on, F switches to behind them.");
             Toggle(list, r, "Third person (F)", () => Plugin.SpectateThirdPerson.Value, v => Plugin.SpectateThirdPerson.Value = v);
             Section(list, "YOUR LOOK", "How the others see your V1.");
-            Palette(list, r, "V1's colour", () => Plugin.BodyColour.Value, v => Plugin.BodyColour.Value = v);
-            Palette(list, r, "Lights", () => Plugin.LightsColour.Value, v => Plugin.LightsColour.Value = v);
-            Palette(list, r, "Wings' glow", () => Plugin.WingsColour.Value, v => Plugin.WingsColour.Value = v);
+            LookPicker(list, r);
             Cycle(list, r, "Your colour (name, card)", () => Plugin.MyColor.Value >= 0 && Plugin.MyColor.Value < Profiles.Colors.Length ? Profiles.Colors[Plugin.MyColor.Value].Name : "AUTO",
                 () => Plugin.MyColor.Value = Plugin.MyColor.Value + 1 >= Profiles.Colors.Length ? -1 : Plugin.MyColor.Value + 1);
         }
@@ -1041,49 +1044,182 @@ namespace Killcraft
             Ui.Button(row, button, 15f, click, Control, 5f, 120f, 30f, TextAlignmentOptions.Center, true, 3f);
         }
 
-        // A colour from a palette (filled: the one chosen), or V1's own.
-        private static readonly string[] PaletteHex =
-        {
-            "FFFFFF", "BFBFBF", "606060", "151515", "E03030", "FF7A1A", "FFC81E", "B8E62E",
-            "35C04A", "1FB89A", "2FD4F0", "4A9BFF", "2B4FE0", "7A3FD1", "B83FD6", "FF5FA8",
-        };
+        // YOUR LOOK: which part (V1, its lights, its wings' glow) on the left, a colour wheel and a
+        // brightness bar for it, and on the right the colour as it is and V1'S OWN. Dragging shows the
+        // colour; letting go puts it on.
+        private static readonly string[] LookParts = { "V1'S COLOUR", "LIGHTS", "WINGS' GLOW" };
+        // (V1's own colours, shown while a part has none of the player's.)
+        private static readonly Color[] LookOwn = { new Color(0.24f, 0.42f, 1f), new Color(1f, 0.8f, 0.2f), new Color(1f, 0.5f, 0.15f) };
+        private static int lookPart;
+        private static float pickH, pickS, pickV = 1f;
+        private static bool picking;
+        private static Texture2D brightTex;
 
-        private static void Palette(Transform list, List<Action> refresh, string label, Func<string> get, Action<string> set)
+        private static string LookGet(int part) => ((part == 0 ? Plugin.BodyColour.Value : part == 1 ? Plugin.LightsColour.Value : Plugin.WingsColour.Value) ?? "").Trim().TrimStart('#').ToUpperInvariant();
+
+        private static void LookSet(int part, string hex)
         {
-            RectTransform row = Ui.Row(list, 44f);
-            Ui.Text(row, label.ToUpperInvariant(), 18f, Color.white, TextAlignmentOptions.MidlineLeft, 12f, 6f, 176f, 32f);
-            var buttons = new List<(UiButton B, string Hex)>();
+            if (part == 0)
+            {
+                Plugin.BodyColour.Value = hex;
+            }
+            else if (part == 1)
+            {
+                Plugin.LightsColour.Value = hex;
+            }
+            else
+            {
+                Plugin.WingsColour.Value = hex;
+            }
+        }
+
+        private static Color LookColour(int part)
+        {
+            string hex = LookGet(part);
+            return hex.Length == 6 && ColorUtility.TryParseHtmlString("#" + hex, out Color c) ? c : LookOwn[part];
+        }
+
+        private static void LookPicker(Transform list, List<Action> refresh)
+        {
+            RectTransform row = Ui.Row(list, 254f);
+            var parts = new UiButton[3];
+            var chips = new Image[3];
             UiButton own = null;
+            TextMeshProUGUI hexText = null;
+            Image preview = null;
+            RectTransform marker = null, handle = null;
+            Image markerFill = null;
+            float wheelSize = 236f, barH = 236f;
+
+            Action visual = () =>
+            {
+                Color c = Color.HSVToRGB(pickH, pickS, pickV);
+                preview.color = c;
+                markerFill.color = c;
+                marker.anchoredPosition = ColourPicker.At(pickH, pickS) * (wheelSize * 0.5f);
+                handle.anchoredPosition = new Vector2(0f, pickV * (barH - 6f) + 3f);
+                if (brightTex == null)
+                {
+                    brightTex = new Texture2D(1, 64, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Clamp };
+                }
+                for (int i = 0; i < 64; i++)
+                {
+                    brightTex.SetPixel(0, i, Color.HSVToRGB(pickH, pickS, i / 63f));
+                }
+                brightTex.Apply();
+                string hex = LookGet(lookPart);
+                hexText.text = picking ? "#" + ColorUtility.ToHtmlStringRGB(c) : hex.Length == 6 ? "#" + hex : "V1'S OWN";
+            };
             Action show = () =>
             {
-                string now = (get() ?? "").Trim().TrimStart('#').ToUpperInvariant();
-                foreach (var b in buttons)
+                for (int k = 0; k < 3; k++)
                 {
-                    b.B.On = b.Hex == now;
-                    b.B.Refresh();
+                    parts[k].On = k == lookPart;
+                    parts[k].Refresh();
+                    chips[k].color = LookColour(k);
                 }
-                own.On = now.Length == 0;
+                own.On = LookGet(lookPart).Length == 0;
                 own.Refresh();
-            };
-            own = Ui.Button(row, "V1'S OWN", 12f, () =>
-            {
-                set("");
-                show();
-            }, 190f, 9f, 92f, 26f, TextAlignmentOptions.Center, true, 2f);
-            own.TextOn = Color.black;
-            for (int k = 0; k < PaletteHex.Length; k++)
-            {
-                string hex = PaletteHex[k];
-                ColorUtility.TryParseHtmlString("#" + hex, out Color c);
-                UiButton b = Ui.Button(row, "", 10f, () =>
+                if (!picking)
                 {
-                    set(hex);
+                    Color.RGBToHSV(LookColour(lookPart), out pickH, out pickS, out pickV);
+                }
+                visual();
+            };
+            Action commit = () =>
+            {
+                picking = false;
+                LookSet(lookPart, ColorUtility.ToHtmlStringRGB(Color.HSVToRGB(pickH, pickS, pickV)));
+                show();
+            };
+
+            // Left: the part being coloured, each with its colour as it is now.
+            for (int k = 0; k < 3; k++)
+            {
+                int part = k;
+                parts[k] = Ui.Button(row, LookParts[k], 16f, () =>
+                {
+                    lookPart = part;
+                    picking = false;
                     show();
-                }, 292f + k * 32f, 9f, 26f, 26f, TextAlignmentOptions.Center, true, 3f);
-                b.Accent = c;
-                b.Refresh();
-                buttons.Add((b, hex));
+                }, 12f, 8f + k * 54f, 276f, 44f, TextAlignmentOptions.Center, true, 3f);
+                parts[k].TextOn = Color.black;
+                Ui.Image(parts[k].transform, Ui.SmallFill, Color.black, 238f, 8f, 30f, 28f);
+                chips[k] = Ui.Image(parts[k].transform, Ui.SmallFill, Color.white, 241f, 11f, 24f, 22f);
             }
+            TextMeshProUGUI hint = Ui.Text(row, "Drag round the wheel for the colour, the bar for how bright. It goes on when you let go.",
+                14f, Ui.Grey, TextAlignmentOptions.TopLeft, 12f, 172f, 276f, 72f);
+            hint.enableWordWrapping = true;
+
+            // The wheel (a dark disc behind it), the chosen point on it.
+            RectTransform shadow = Ui.Rect(row, "Wheel Shadow", 306f, 4f, wheelSize + 8f, wheelSize + 8f);
+            Ui.Picture(shadow, Ui.CircleFill, new Color(0f, 0f, 0f, 0.85f));
+            RectTransform wheel = Ui.Rect(row, "Wheel", 310f, 8f, wheelSize, wheelSize);
+            Image wi = Ui.Picture(wheel, ColourPicker.Wheel, Color.white);
+            wi.raycastTarget = true;
+            var wheelPick = wheel.gameObject.AddComponent<UiPickArea>();
+            wheelPick.Moved = uv =>
+            {
+                ColourPicker.From((uv - new Vector2(0.5f, 0.5f)) * 2f, out pickH, out pickS);
+                if (!picking && pickV < 0.15f)
+                {
+                    pickV = 1f;  // (a colour picked while black: seen)
+                }
+                picking = true;
+                visual();
+            };
+            wheelPick.Released = commit;
+            marker = Ui.Rect(wheel, "Marker", 0f, 0f, 22f, 22f);
+            marker.anchorMin = marker.anchorMax = marker.pivot = new Vector2(0.5f, 0.5f);
+            marker.sizeDelta = new Vector2(22f, 22f);
+            Ui.Picture(marker, Ui.CircleFill, Color.black);
+            Ui.Picture(Ui.Fill(marker, "Ring", 3f), Ui.CircleFill, Color.white);
+            markerFill = Ui.Picture(Ui.Fill(marker, "Colour", 6f), Ui.CircleFill, Color.white);
+
+            // The brightness bar: dark at the bottom, the colour at its brightest at the top.
+            RectTransform bar = Ui.Rect(row, "Brightness", 566f, 8f, 30f, barH);
+            Image hit = bar.gameObject.AddComponent<Image>();
+            hit.color = Color.black;
+            hit.raycastTarget = true;
+            RectTransform grad = Ui.Fill(bar, "Gradient", 3f);
+            var gradImage = grad.gameObject.AddComponent<RawImage>();
+            gradImage.raycastTarget = false;
+            if (brightTex == null)
+            {
+                brightTex = new Texture2D(1, 64, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Clamp };
+            }
+            gradImage.texture = brightTex;
+            Ui.Sliced(Ui.Picture(Ui.Fill(bar, "Edge"), Ui.SmallLine, Color.white), 2.5f);
+            handle = Ui.Rect(bar, "Handle", 0f, 0f, 0f, 0f);
+            handle.anchorMin = new Vector2(0f, 0f);
+            handle.anchorMax = new Vector2(1f, 0f);
+            handle.pivot = new Vector2(0.5f, 0.5f);
+            handle.sizeDelta = new Vector2(10f, 8f);
+            Ui.Picture(handle, null, Color.black);
+            Ui.Picture(Ui.Fill(handle, "Line", 2f), null, Color.white);
+            var barPick = bar.gameObject.AddComponent<UiPickArea>();
+            barPick.Moved = uv =>
+            {
+                pickV = Mathf.Clamp01(uv.y);
+                picking = true;
+                visual();
+            };
+            barPick.Released = commit;
+
+            // Right: the colour, its hex, V1's own.
+            RectTransform pv = Ui.Rect(row, "Preview", 618f, 8f, 220f, 108f);
+            Ui.Picture(pv, Ui.SmallFill, Color.black);
+            preview = Ui.Picture(Ui.Fill(pv, "Colour", 4f), Ui.SmallFill, Color.white);
+            Ui.Sliced(Ui.Picture(Ui.Fill(pv, "Edge"), Ui.SmallLine, Color.white), 3f);
+            hexText = Ui.Text(row, "", 20f, Color.white, TextAlignmentOptions.Center, 618f, 122f, 220f, 32f);
+            own = Ui.Button(row, "V1'S OWN", 16f, () =>
+            {
+                picking = false;
+                LookSet(lookPart, "");
+                show();
+            }, 618f, 164f, 220f, 40f, TextAlignmentOptions.Center, true, 3f);
+            own.TextOn = Color.black;
+
             refresh.Add(show);
             show();
         }

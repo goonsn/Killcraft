@@ -100,6 +100,10 @@ namespace Killcraft
                 ready.Add(from);
                 return;
             }
+            if (!Party.FromHost(from))
+            {
+                return;
+            }
             if (kind == KindAbort)
             {
                 if (Active)

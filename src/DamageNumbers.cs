@@ -127,7 +127,7 @@ namespace Killcraft
         [HarmonyPatch(typeof(EnemyIdentifier), nameof(EnemyIdentifier.DeliverDamage)), HarmonyPostfix]
         private static void DamageAfter(EnemyIdentifier __instance, GameObject target, Vector3 hitPoint, GameObject sourceWeapon, Before __state)
         {
-            if (!show || __instance == null || __state.Dead || Pvp.Is(__instance) || !ByPlayer(__instance.hitter, sourceWeapon))
+            if (!show || __instance == null || __state.Dead || EnemySync.OthersHit || Pvp.Is(__instance) || !ByPlayer(__instance.hitter, sourceWeapon))
             {
                 return;
             }

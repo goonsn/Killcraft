@@ -56,7 +56,19 @@ namespace Killcraft
 
         public static bool IsWatching => active && watching;
 
-        public static bool Revivable => active && Plugin.Revive.Value;
+        public static bool Revivable => active && Plugin.Revive.Value && !MinosMode.Round;
+
+        // A Minos Prime round: out, watching the V1s still in it.
+        internal static void BeginFor(NewMovement nm)
+        {
+            if (!active && Alive().Count > 0)
+            {
+                Begin(nm);
+            }
+        }
+
+        // A Minos Prime round: back in after dying, there.
+        internal static void ReviveAt(Vector3 at, float facing) => Revive(at, facing, false);
 
         // The sandbox has no checkpoints: there R respawns, as ULTRAKILL's own would (a friend can
         // still revive).
@@ -104,6 +116,12 @@ namespace Killcraft
             {
                 if (__state || __instance == null || !__instance.dead || ReplayPlayer.Active || ReplayPlayer.Pending)
                 {
+                    return;
+                }
+                // (A Minos Prime round: the round says whether this V1's back or out.)
+                if (MinosMode.Round)
+                {
+                    MinosMode.LocalDied(__instance);
                     return;
                 }
                 if (__instance.endlessMode)
@@ -268,7 +286,7 @@ namespace Killcraft
             foreach (int id in Room.Peers)
             {
                 Profiles.Info i = Profiles.Of(id);
-                if (i.Fresh && i.State == Profiles.StatePlaying && i.Scene == SceneHelper.CurrentScene)
+                if (i.Fresh && i.State == Profiles.StatePlaying && i.Scene == SceneHelper.CurrentScene && !MinosMode.IsMinos(id))
                 {
                     list.Add(id);
                 }
@@ -540,6 +558,10 @@ namespace Killcraft
 
         private static void Reviving(NewMovement nm)
         {
+            if (MinosMode.Round)
+            {
+                return;
+            }
             float need = Mathf.Clamp(Plugin.ReviveSeconds.Value, 1f, 10f);
             shownReviving = int.MinValue;
             bool send = Time.unscaledTime - reviveSentAt > 0.2f;
@@ -649,7 +671,7 @@ namespace Killcraft
             if (type == ReviveMessage)
             {
                 float progress = r.ReadSingle();
-                if (!active || watching || !Plugin.Revive.Value)
+                if (!active || watching || !Plugin.Revive.Value || MinosMode.Round)
                 {
                     return;
                 }
@@ -786,7 +808,9 @@ namespace Killcraft
                 title.text = $"<color=#FFA030>SPECTATING</color>  <color=#{Ui.Hex(Profiles.Of(target).Color)}>{who}</color>";
                 string view = Plugin.SpectateThirdPerson.Value ? (behind ? "  ·  F: THEIR EYES" : "  ·  F: BEHIND THEM") : "";
                 bool cyber = MonoSingleton<NewMovement>.Instance != null && MonoSingleton<NewMovement>.Instance.endlessMode;
-                hint.text = cyber
+                hint.text = MinosMode.Round
+                    ? "LEFT / RIGHT CLICK: SWITCH  ·  OUT UNTIL THE ROUND'S OVER" + view
+                    : cyber
                     ? "LEFT / RIGHT CLICK: SWITCH  ·  BACK WHEN THE WAVE'S CLEARED" + view
                     : watching
                     ? "LEFT / RIGHT CLICK: SWITCH  ·  ESC: JOIN" + view

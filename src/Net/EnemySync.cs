@@ -274,6 +274,9 @@ namespace Killcraft
             return byId.TryGetValue(id, out eid) && eid != null ? eid : null;
         }
 
+        // (LevelEvents: an enemy by its name.)
+        internal static EnemyIdentifier Find(uint id) => Lookup(id, 0.5f);
+
         // ---- each frame ----
 
         // Killed by the authority before this player had found them (just woken, just made): killed
@@ -508,6 +511,9 @@ namespace Killcraft
 
         // ---- the authority: where its enemies are ----
 
+        // (As many as fit in one message, each radiant: 4 + 450 x (44 + 4 + 1 + 16) bytes, under KillNet's 30000.)
+        private const int SnapshotMax = 450;
+
         private static void SendSnapshot(List<EnemyIdentifier> current)
         {
             var list = new List<EnemyIdentifier>();
@@ -520,8 +526,8 @@ namespace Killcraft
             }
             KillNet.Send(Snapshot, KillNet.ToRoom, w =>
             {
-                w.Write(Mathf.Min(list.Count, 600));
-                for (int i = 0; i < list.Count && i < 600; i++)
+                w.Write(Mathf.Min(list.Count, SnapshotMax));
+                for (int i = 0; i < list.Count && i < SnapshotMax; i++)
                 {
                     EnemyIdentifier eid = list[i];
                     Transform t = eid.transform;
@@ -549,17 +555,17 @@ namespace Killcraft
                     w.Write(v.z);
                 }
                 // (Newer: each one's health, in the same order.)
-                for (int i = 0; i < list.Count && i < 600; i++)
+                for (int i = 0; i < list.Count && i < SnapshotMax; i++)
                 {
                     w.Write(HealthOf(list[i]));
                 }
                 // (Newer still: each one's radiance - an Idol's, a sand zone's, a level's - as flags; then
                 // for each radiant one its tier and how much each buff does.)
-                for (int i = 0; i < list.Count && i < 600; i++)
+                for (int i = 0; i < list.Count && i < SnapshotMax; i++)
                 {
                     w.Write(RadianceOf(list[i]));
                 }
-                for (int i = 0; i < list.Count && i < 600; i++)
+                for (int i = 0; i < list.Count && i < SnapshotMax; i++)
                 {
                     EnemyIdentifier eid = list[i];
                     if (RadianceOf(eid) != 0)
@@ -641,7 +647,8 @@ namespace Killcraft
                     }
                     break;
                 case Damage:
-                    if (Authority)
+                    // (The Minos player's: hits on their Minos, MinosControl.)
+                    if (Authority || MinosMode.IAmMinos)
                     {
                         HandleDamage(from, r);
                     }
@@ -732,7 +739,10 @@ namespace Killcraft
                     float h = r.ReadSingle();
                     if (byId.TryGetValue(order[i], out EnemyIdentifier e) && e != null && !e.dead)
                     {
-                        SetHealth(e, h);
+                        if (!MinosControl.IsBody(e))
+                        {
+                            SetHealth(e, h);
+                        }
                     }
                 }
                 if (r.BaseStream.Length - r.BaseStream.Position >= n)
@@ -1012,6 +1022,11 @@ namespace Killcraft
                 }
             }
             EnemyIdentifier eid = Lookup(id, 0.5f);
+            // (The Minos player: hits on their Minos, whatever he's called here.)
+            if (MinosMode.IAmMinos && kind == (int)EnemyType.MinosPrime && MinosControl.Eid != null)
+            {
+                eid = MinosControl.Eid;
+            }
             bool byPlace = false;
             if ((eid == null || eid.dead) && kind >= 0)
             {
@@ -1040,13 +1055,21 @@ namespace Killcraft
                 {
                     eid.hitter = hitter;
                 }
+                OthersHit = true;
                 eid.DeliverDamage(hit.gameObject, force, point, multiplier, (flags & 1) != 0, crit, null, (flags & 2) != 0, (flags & 4) != 0);
             }
             catch (Exception e)
             {
                 Plugin.Log.LogWarning($"KillNet: player {from}'s hit on {eid.name} failed ({e.Message})");
             }
+            finally
+            {
+                OthersHit = false;
+            }
         }
+
+        // (Another player's hit being taken here: DamageNumbers leaves it to them.)
+        internal static bool OthersHit;
 
         // The authority's living enemy of this kind nearest to where another player's copy is.
         private static EnemyIdentifier Nearest(int kind, Vector3 at)
@@ -1160,10 +1183,10 @@ namespace Killcraft
         }
 
         private static bool ForwardHit(EnemyIdentifier eid, GameObject target, Vector3 force, Vector3 hitPoint, float multiplier, bool tryForExplode,
-            float critMultiplier, bool ignoreTotalDamageTakenMultiplier, bool fromExplosion)
+            float critMultiplier, bool ignoreTotalDamageTakenMultiplier, bool fromExplosion, int toPlayer = int.MinValue)
         {
             uint id = IdOf(eid);
-            if (deadThere.Contains(id))
+            if (toPlayer == int.MinValue && deadThere.Contains(id))
             {
                 return true;
             }
@@ -1178,7 +1201,7 @@ namespace Killcraft
                 toldSent++;
                 Plugin.Log.LogInfo($"KillNet: hit {eid.name} ({id}, {hitter}, x{multiplier:0.##}): sent to player {Room.AuthorityId}, who runs it");
             }
-            KillNet.Send(Damage, KillNet.ToAuthority, w =>
+            KillNet.Send(Damage, toPlayer != int.MinValue ? KillNet.ToPlayer : KillNet.ToAuthority, w =>
             {
                 w.Write(id);
                 w.Write(part);
@@ -1197,9 +1220,14 @@ namespace Killcraft
                 w.Write(at.y);
                 w.Write(at.z);
                 w.Write(hitter);
-            });
+            }, toPlayer != int.MinValue ? toPlayer : 0);
             return true;
         }
+
+        // (A Minos Prime round's Minos: his player's game says how he is, MinosControl.)
+        internal static void KillNow(EnemyIdentifier eid) => Kill(eid);
+
+        internal static void ShowHealth(EnemyIdentifier eid, float h) => SetHealth(eid, h);
 
         private static int toldSent, toldTaken, toldLocal;
 
@@ -1225,6 +1253,10 @@ namespace Killcraft
                 }
                 return false;
             }
+            if (MinosControl.CopyHitting && !applying)
+            {
+                return false;
+            }
             if (Replay.Recording && __instance != null && !__instance.dead)
             {
                 try
@@ -1236,6 +1268,32 @@ namespace Killcraft
                 catch
                 {
                 }
+            }
+            // A Minos Prime round's Minos: his player's (hit there), whoever runs the level's enemies.
+            if (!applying && MinosControl.IsBody(__instance))
+            {
+                if (MinosMode.IAmMinos)
+                {
+                    return true;
+                }
+                if (__instance.hitter == "fire")
+                {
+                    return false;  // (his burning here is for show: he burns in his player's game too, LevelEvents)
+                }
+                if (!__instance.dead)
+                {
+                    try
+                    {
+                        ForwardHit(__instance, target, force, hitPoint, multiplier, tryForExplode, critMultiplier, ignoreTotalDamageTakenMultiplier, fromExplosion, MinosMode.MinosId);
+                        DamageNumbers.Sent(__instance, target, hitPoint, multiplier, critMultiplier);
+                        Bleed(__instance, target, multiplier, critMultiplier, fromExplosion);
+                    }
+                    catch (Exception e)
+                    {
+                        Plugin.Log.LogWarning($"minos: couldn't send a hit on him ({e.Message})");
+                    }
+                }
+                return false;
             }
             if (!Puppets || applying || __instance == null)
             {
@@ -1249,6 +1307,10 @@ namespace Killcraft
                     Plugin.Log.LogInfo($"KillNet: hit {__instance.name} ({id}) here: the authority hasn't said where it is lately ({states.Count} of its enemies heard of)");
                 }
                 return !deadThere.Contains(id);  // (one the authority's killed: dies here soon)
+            }
+            if (__instance.hitter == "fire")
+            {
+                return false;  // (its burning here is for show: the authority's enemy burns too, LevelEvents)
             }
             try
             {
@@ -1264,7 +1326,8 @@ namespace Killcraft
         }
 
         // A puppet only dies when the authority's enemy does (Kill), not of anything here.
-        private static bool OnInstaKill(EnemyIdentifier __instance) => !Pvp.Is(__instance) && (!Puppets || applying || __instance == null || !IsPuppet(__instance, out _));
+        private static bool OnInstaKill(EnemyIdentifier __instance) => MinosControl.IsBody(__instance) ? MinosMode.IAmMinos || applying
+            : !Pvp.Is(__instance) && (!Puppets || applying || __instance == null || !IsPuppet(__instance, out _));
 
         private static bool OnProcessDeath(EnemyIdentifier __instance, out bool __state)
         {
@@ -1273,6 +1336,10 @@ namespace Killcraft
             {
                 __state = false;
                 return false;  // (another player's target never dies)
+            }
+            if (MinosControl.IsBody(__instance))
+            {
+                return MinosMode.IAmMinos || applying;  // (Minos dies on his player's game, then everyone's)
             }
             return !Puppets || applying || __instance == null || !IsPuppet(__instance, out _);
         }
@@ -1291,10 +1358,17 @@ namespace Killcraft
         // The authority's enemies go after the nearest player, this one or another.
         private static void AfterUpdateTarget(EnemyIdentifier __instance)
         {
+            // (A Minos Prime round's Minos: whoever his player goes at.)
+            if (MinosControl.TargetFor(__instance, out EnemyTarget minosTarget))
+            {
+                __instance.target = minosTarget;
+                return;
+            }
             // (Not Stalkers: theirs is the player or an enemy, and another player's marker is neither:
             // they broke on it every frame, and stood still.)
             if (!Authority || __instance == null || __instance.target == null || !__instance.target.isPlayer || __instance.enemyType == EnemyType.Stalker)
             {
+                AtMinos(__instance);
                 return;
             }
             try
@@ -1318,6 +1392,22 @@ namespace Killcraft
             }
             catch
             {
+            }
+            AtMinos(__instance);
+        }
+
+        // This player is Minos (their V1 put away inside him): what was after V1 goes after him, as an
+        // enemy after another (its shots, swings and black holes land on him).
+        private static void AtMinos(EnemyIdentifier eid)
+        {
+            if (!MinosMode.IAmMinos || eid == null || eid.target == null || !eid.target.isPlayer || MinosControl.IsBody(eid))
+            {
+                return;
+            }
+            EnemyTarget him = MinosControl.SelfTarget;
+            if (him != null)
+            {
+                eid.target = him;
             }
         }
     }

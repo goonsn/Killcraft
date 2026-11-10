@@ -93,6 +93,16 @@ namespace Killcraft
 
         public static bool Has(int id) => id == Room.MyId || others.ContainsKey(id);
 
+        // Everyone known: this player, then the others (Skins: the looks still worn).
+        public static IEnumerable<Info> All()
+        {
+            yield return Mine;
+            foreach (Info i in others.Values)
+            {
+                yield return i;
+            }
+        }
+
         // A player's name: their Steam name, else their Minecraft one.
         public static string NameOf(int id)
         {

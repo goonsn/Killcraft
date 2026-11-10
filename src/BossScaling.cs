@@ -9,7 +9,17 @@ namespace Killcraft
     {
         private static void Postfix(EnemyIdentifier __instance)
         {
-            if (__instance == null || !__instance.isBoss || !Room.Shared)
+            if (__instance == null)
+            {
+                return;
+            }
+            // (A Minos Prime round: Minos's health times the V1s.)
+            if (MinosMode.HealthFor(__instance, out float times))
+            {
+                __instance.totalHealthModifier *= times;
+                return;
+            }
+            if (!__instance.isBoss || !Room.Shared)
             {
                 return;
             }

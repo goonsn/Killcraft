@@ -3,7 +3,7 @@
     <TargetFramework>netstandard2.1</TargetFramework>
     <AssemblyName>Killcraft</AssemblyName>
     <!-- The mod's version, in the dll too (the launcher reads it): keep it the same as Plugin.cs's BepInPlugin. -->
-    <Version>2.0.1</Version>
+    <Version>2.0.2</Version>
     <RootNamespace>Killcraft</RootNamespace>
     <LangVersion>latest</LangVersion>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
@@ -21,6 +21,19 @@
     <!-- The launcher and the Minecraft mod are their own projects in this repo. -->
     <Compile Remove="launcher/**;mcmod/**;design/**" />
     <None Remove="launcher/**;mcmod/**;design/**" />
+  </ItemGroup>
+
+  <!-- KillNet alone (dotnet build -c Release -p:KillNetOnly=true): the multiplayer without anything of
+       Minecraft's. Left out: starting Minecraft, the link to it (shared memory, its local port), drawing
+       its world, and the second-player-on-one-PC test link. Only Steam (lobbies and peer-to-peer). -->
+  <PropertyGroup Condition="'$(KillNetOnly)' == 'true'">
+    <DefineConstants>$(DefineConstants);KILLNET_ONLY</DefineConstants>
+    <AssemblyName>KillNet</AssemblyName>
+    <IntermediateOutputPath>obj\$(Configuration)\killnet\</IntermediateOutputPath>
+    <OutputPath>bin\$(Configuration)\killnet\</OutputPath>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(KillNetOnly)' == 'true'">
+    <Compile Remove="src\Collision.cs;src\Combat.cs;src\Destruction.cs;src\HeldItems.cs;src\HudHider.cs;src\InputForward.cs;src\Launcher.cs;src\Link.cs;src\Lockout.cs;src\McAudio.cs;src\McCommand.cs;src\McSave.cs;src\MobHits.cs;src\ModeChoice.cs;src\Nether.cs;src\NetherWorld.cs;src\Overlay.cs;src\Proto.cs;src\SmileOs.cs;src\WorldRender.cs;src\OwnFolders.cs;src\Net\DiscordRpc.cs;src\Net\LocalLink.cs" />
   </ItemGroup>
 
   <ItemGroup>
@@ -56,11 +69,11 @@
   <Target Name="Deploy" AfterTargets="Build">
     <MakeDir Directories="$(PluginDir)" />
     <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(PluginDir)" />
-    <Copy SourceFiles="second-player.bat" DestinationFolder="$(PluginDir)" />
+    <Copy SourceFiles="second-player.bat" DestinationFolder="$(PluginDir)" Condition="'$(KillNetOnly)' != 'true'" />
     <!-- Killcraft's Minecraft mod (mcmod, built with Gradle), shipped next to the plugin. -->
     <ItemGroup>
       <ModJar Include="mcmod\build\libs\killcraft-mc-*.jar" />
     </ItemGroup>
-    <Copy SourceFiles="@(ModJar)" DestinationFiles="$(PluginDir)\killcraft-mc.jar" Condition="'@(ModJar)' != ''" />
+    <Copy SourceFiles="@(ModJar)" DestinationFiles="$(PluginDir)\killcraft-mc.jar" Condition="'@(ModJar)' != '' And '$(KillNetOnly)' != 'true'" />
   </Target>
 </Project>

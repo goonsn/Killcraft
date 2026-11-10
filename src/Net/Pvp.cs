@@ -79,7 +79,7 @@ namespace Killcraft
         private static bool loggedMade, loggedTaken;
         private static readonly HashSet<string> loggedHits = new HashSet<string>();
 
-        public static bool On => Room.Shared && Room.Pvp;
+        public static bool On => Room.Shared && Room.Pvp && !MinosMode.Active;
 
         // One of the other players' targets (not one of the level's enemies).
         public static bool Is(EnemyIdentifier eid) => eid != null && eids.Count > 0 && eids.Contains(eid.GetInstanceID());

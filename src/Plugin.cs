@@ -7,7 +7,7 @@ using UnityEngine.SceneManagement;
 
 namespace Killcraft
 {
-    [BepInPlugin("dev.killcraft", "Killcraft", "2.0.1")]
+    [BepInPlugin("dev.killcraft", "Killcraft", "2.0.2")]
     public sealed class Plugin : BaseUnityPlugin
     {
         internal static ManualLogSource Log;
@@ -20,6 +20,10 @@ namespace Killcraft
         // no Minecraft: multiplayer only, whatever the setting.
         internal static bool WithMinecraft => StartMinecraft != null && StartMinecraft.Value && MinecraftThere;
         private static int minecraftThere = -1;
+#if KILLNET_ONLY
+        // (KillNet's own build: no Minecraft, ever.)
+        internal static bool MinecraftThere => false;
+#else
         internal static bool MinecraftThere
         {
             get
@@ -33,10 +37,12 @@ namespace Killcraft
                 return minecraftThere == 1;
             }
         }
+#endif
         internal static ConfigEntry<string> LauncherPath;
         internal static ConfigEntry<string> LauncherArgs;
         internal static ConfigEntry<bool> Diagnostics;
         internal static ConfigEntry<int> SimLatencyMs;
+        internal static ConfigEntry<int> MinosPick, MinosRules, MinosLives;
         internal static ConfigEntry<float> SimLossPercent;
         internal static ConfigEntry<float> BlockBrightness;
         internal static ConfigEntry<int> TntFuseTicks;
@@ -225,6 +231,9 @@ namespace Killcraft
             ThirdPersonKey = cfg.Bind("Controls", "ThirdPerson", "F5",
                 "Key that switches V1 between first and third person in ULTRAKILL mode (not while spectating). A Unity Input System key name.");
             Diagnostics = cfg.Bind("Debug", "Diagnostics", false, "Extra logging (collision sources, timings). With it on, F8 in a level shows the other players' network and animation state (their last reported position in red, where they're drawn in green).");
+            MinosPick = cfg.Bind("Minos Prime", "WhoIsMinos", 0, "The Minos Prime game mode (your party, as its host): who's Minos. 0 the host picks (a player's ..., MAKE MINOS), 1 random, 2 a random volunteer.");
+            MinosRules = cfg.Bind("Minos Prime", "Rules", 0, "0: one life each (dead V1s spectate); 1: the V1s share a pool of lives.");
+            MinosLives = cfg.Bind("Minos Prime", "LivesPerV1", 3, "Shared lives: how many each V1 adds to the pool (1 to 10).");
             SimLatencyMs = cfg.Bind("Debug", "SimLatencyMs", 0, "Pretend lag, in milliseconds, on what the other players say of their V1 (to test with two Killcrafts on one PC). 0 for none.");
             SimLossPercent = cfg.Bind("Debug", "SimLossPercent", 0f, "Pretend packet loss, in percent, on what the other players say of their V1. 0 for none.");
             ShaderPack.Bind(cfg);
@@ -235,6 +244,7 @@ namespace Killcraft
             EnemySync.Install(harmony);
             WorldSync.Install(harmony);
             Shots.Install(harmony);
+            LevelEvents.Install(harmony);
             V1Body.Install(harmony);
 
             EnsureHost();

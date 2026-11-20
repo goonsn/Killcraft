@@ -34,7 +34,11 @@ namespace Killcraft
         private static byte lastFlags = 255;
 
         // Others here (the server said so lately).
-        public static bool Shared => ReplayAuthority != int.MinValue || (Peers.Count > 0 && Time.unscaledTime - heardAt < 5f);
+        // (Not in VERSUS: everyone plays the level on their own there, only seeing the others: Ghosts.)
+        public static bool Shared => ReplayAuthority != int.MinValue || (Peers.Count > 0 && Time.unscaledTime - heardAt < 5f && !Versus.On);
+
+        // VERSUS, with others in the level: only where each one's V1 is, and what it does, goes between them.
+        public static bool Ghosts => Versus.On && ReplayAuthority == int.MinValue && Peers.Count > 0 && Time.unscaledTime - heardAt < 5f;
         public static bool IAmAuthority => ReplayAuthority == int.MinValue && (!Shared || MyId == AuthorityId);
 
         // The level's goings-on worth saying: to others here, or kept for this run's replay.

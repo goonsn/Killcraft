@@ -385,6 +385,17 @@ namespace Killcraft
             }
             if (MinosMode.IAmMinos)
             {
+                // (His own Update rests him only while he has a target: with nobody to go at - the V1s
+                // out, dead, not here yet - he stayed "catching his breath" for good.)
+                if (Awake && eid != null && !eid.dead && eid.target == null && !inActionOf(Body) && cooldownOf(Body) > 0f)
+                {
+                    cooldownOf(Body) = Mathf.MoveTowards(cooldownOf(Body), 0f, Time.deltaTime);
+                }
+                CameraController cam = MonoSingleton<CameraController>.Instance;
+                if (cam != null && !cam.activated && CanAct())
+                {
+                    cam.activated = true;
+                }
                 OptionsManager om = MonoSingleton<OptionsManager>.Instance;
                 if (!(om != null && om.paused) && !Typing.Active && UkThirdPerson.Pressed())
                 {
@@ -970,7 +981,39 @@ namespace Killcraft
 
         public static float TeleportLeft => Mathf.Max(0f, TeleportCooldown - (Time.unscaledTime - teleportedAt));
 
-        public static bool Tired => Body != null && cooldownOf(Body) > 0f && !inActionOf(Body);
+        public static bool Tired => Awake && cooldownOf(Body) > 0f && !inActionOf(Body) && activatedOf(Body);
+
+        // (The round's first 12 seconds as Minos, every 2: how he is, for the log.)
+        private static float reportedAt = -100f;
+
+        public static void Report(float sincePhase, bool fighting)
+        {
+            if (!MinosMode.IAmMinos || Body == null || !fighting || sincePhase > 12f || Time.unscaledTime - reportedAt < 2f)
+            {
+                return;
+            }
+            reportedAt = Time.unscaledTime;
+            try
+            {
+                EnemyIdentifier eid = eidOf(Body);
+                string off = "";
+                for (Transform t = Body.transform; t != null; t = t.parent)
+                {
+                    if (!t.gameObject.activeSelf)
+                    {
+                        off += (off.Length > 0 ? ", " : "") + t.name;
+                    }
+                }
+                CameraController cc = MonoSingleton<CameraController>.Instance;
+                Plugin.Log.LogInfo($"minos: him: on {Body.gameObject.activeInHierarchy}{(off.Length > 0 ? $" (off: {off})" : "")}, activated {activatedOf(Body)}, dead {(eid != null && eid.dead)}, "
+                    + $"rest {cooldownOf(Body):0.00}, in action {inActionOf(Body)}, target {(eid != null && eid.target != null)}, at {Body.transform.position}, "
+                    + $"camera {(cc != null ? cc.transform.position.ToString() : "none")}, time {Time.timeScale:0.00}");
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogInfo($"minos: him: ({e.Message})");
+            }
+        }
 
         // Who he's going at, as one number (the target marker's: a new one, a new lock-on).
         public static long TargetKey => ((long)TargetId << 32) ^ targetEnemyId;

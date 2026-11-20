@@ -3,7 +3,7 @@
     <TargetFramework>netstandard2.1</TargetFramework>
     <AssemblyName>Killcraft</AssemblyName>
     <!-- The mod's version, in the dll too (the launcher reads it): keep it the same as Plugin.cs's BepInPlugin. -->
-    <Version>2.0.2</Version>
+    <Version>2.0.3</Version>
     <RootNamespace>Killcraft</RootNamespace>
     <LangVersion>latest</LangVersion>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
@@ -34,6 +34,13 @@
   </PropertyGroup>
   <ItemGroup Condition="'$(KillNetOnly)' == 'true'">
     <Compile Remove="src\Collision.cs;src\Combat.cs;src\Destruction.cs;src\HeldItems.cs;src\HudHider.cs;src\InputForward.cs;src\Launcher.cs;src\Link.cs;src\Lockout.cs;src\McAudio.cs;src\McCommand.cs;src\McSave.cs;src\MobHits.cs;src\ModeChoice.cs;src\Nether.cs;src\NetherWorld.cs;src\Overlay.cs;src\Proto.cs;src\SmileOs.cs;src\WorldRender.cs;src\OwnFolders.cs;src\Net\DiscordRpc.cs;src\Net\LocalLink.cs" />
+  </ItemGroup>
+
+  <!-- The hats' models (design\hats\build_hats.py and blender_kit.py make them), read by src\Net\Hats.cs. -->
+  <ItemGroup>
+    <EmbeddedResource Include="design\hats\hats.bin" LogicalName="Killcraft.hats.bin" />
+    <!-- The party style ranks' words (design\ranks\export_words.py), read by src\PartyStyleHud.cs. -->
+    <EmbeddedResource Include="design\ranks\*.png" LogicalName="Killcraft.ranks.%(Filename).png" />
   </ItemGroup>
 
   <ItemGroup>

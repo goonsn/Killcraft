@@ -95,7 +95,8 @@ namespace Killcraft
                 }
             }
             a.Append("\"timestamps\":{\"start\":").Append(Start).Append("},");
-            a.Append("\"assets\":{\"large_image\":\"killcraft\",\"large_text\":\"" + Brand.Title + "\"}}");
+            // (The app's art assets: "killcraft", the block, and "killnet", the networked globe.)
+            a.Append("\"assets\":{\"large_image\":\"" + (Brand.Craft ? "killcraft" : "killnet") + "\",\"large_text\":\"" + Brand.Title + "\"}}");
             return "{\"pid\":" + System.Diagnostics.Process.GetCurrentProcess().Id + ",\"activity\":" + a + "}";
         }
 

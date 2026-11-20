@@ -204,6 +204,8 @@ namespace Killcraft
         }
 
         private static readonly string[] Keys = { "V", "B", "T", "G", "X", "Z", "CapsLock", "LeftAlt", "Mouse4", "Mouse5" };
+        private static readonly string[] BoardKeys = { "Tab", "CapsLock", "LeftAlt", "Backquote", "I", "O" };
+        private static readonly string[] PingKeys = { "Mouse3", "Mouse4", "Mouse5", "G", "X", "Z", "C", "LeftAlt" };
 
         private static SettingsPage Model()
         {
@@ -222,9 +224,27 @@ namespace Killcraft
             Toggle(mp, "Put back on solid ground after falling out of the map", Plugin.OutOfMapRescue);
             Toggle(mp, "Go where the party host goes", Plugin.FollowHost);
             Toggle(mp, "Rejoin the party by itself after a drop or a crash", Plugin.AutoRejoin);
-            Slider(mp, "Boss health per extra player", 0f, 2f, Plugin.BossHealthPerPlayer);
+            Dropdown(mp, "Game mode (the party host's)", new[] { "CO-OP", "VERSUS" }, () => PartyRules.Mode, PartyRules.SetMode);
+            Dropdown(mp, "Versus: win by (the party host's)", new[] { PartyRules.WinByName(true), PartyRules.WinByName(false) },
+                () => PartyRules.VersusScore ? 0 : 1, v => PartyRules.SetVersusScore(v == 0));
+            Dropdown(mp, "Versus: race (the party host's)", new[] { PartyRules.RaceName(false), PartyRules.RaceName(true) },
+                () => PartyRules.VersusLayer ? 1 : 0, v => PartyRules.SetVersusLayer(v == 1));
+            Toggle(mp, "Level vote on the party screen (the party host's)", () => PartyRules.Mine ? Plugin.LevelVote.Value : PartyRules.Vote, PartyRules.SetVote);
+            Slider(mp, "Enemy health per extra player (the party host's)", 0f, 2f, () => PartyRules.EnemyHealth, PartyRules.SetEnemyHealth);
+            Slider(mp, "Boss health per extra player (the party host's)", 0f, 2f, () => PartyRules.BossHealth, PartyRules.SetBossHealth);
             Dropdown(mp, "Server list", new[] { "INVITE ONLY", "STEAM FRIENDS", "EVERYONE" },
                 () => Plugin.ListWorld.Value, v => Plugin.ListWorld.Value = v);
+
+            SettingsCategory party = Category("Party", "The scoreboard, pings, who's talking. (Your hat: Esc > " + Brand.Name + " > HUD.)");
+            cats.Add(party);
+            Toggle(party, "Scoreboard (the level's end, and while its key is held)", Plugin.Scoreboard);
+            Dropdown(party, "Scoreboard key", BoardKeys, () => Mathf.Max(0, Array.FindIndex(BoardKeys, k => string.Equals(k, Plugin.ScoreboardKey.Value, StringComparison.OrdinalIgnoreCase))),
+                v => Plugin.ScoreboardKey.Value = BoardKeys[Mathf.Clamp(v, 0, BoardKeys.Length - 1)]);
+            Toggle(party, "Pings (mark an enemy or a spot for the others)", Plugin.Pings);
+            Dropdown(party, "Ping key", PingKeys, () => Mathf.Max(0, Array.FindIndex(PingKeys, k => string.Equals(k, Plugin.PingKey.Value, StringComparison.OrdinalIgnoreCase))),
+                v => Plugin.PingKey.Value = PingKeys[Mathf.Clamp(v, 0, PingKeys.Length - 1)]);
+            Toggle(party, "A speaker over whoever's talking", Plugin.TalkIcons);
+            Toggle(party, "Party style meter in co-op (in place of ULTRAKILL's)", Plugin.PartyStyleOn);
 
             SettingsCategory dying = Category("Dying in a party", "While someone else in the party is still alive in the level.");
             cats.Add(dying);
@@ -265,6 +285,8 @@ namespace Killcraft
                 RefreshShown();
             });
 
+#if !KILLNET_ONLY
+            // (Both of these are Minecraft's: its health, its world. KillNet's own build has none.)
             SettingsCategory gp = Category("Gameplay");
             cats.Add(gp);
             Toggle(gp, "Enemies hit harder on harder difficulties", Plugin.DamageByDifficulty);
@@ -289,6 +311,7 @@ namespace Killcraft
             {
                 Toggle(mc, "Ask KILLNET or KILLCRAFT at start", Plugin.AskMode);
             }
+#endif
 
             model = ScriptableObject.CreateInstance<SettingsPage>();
             model.hideFlags = HideFlags.HideAndDontSave;

@@ -547,6 +547,7 @@ namespace Killcraft
             { long kcT = Perf.Now(); UkThirdPerson.Frame(mcDisabled || !haveMc, inGame, paused, cc); Perf.Add("UkThirdPerson.Frame", kcT); }
             { long kcT = Perf.Now(); ShaderPack.Frame(inGame, paused, Patches.McScreenOpen || McCommand.Busy); Perf.Add("ShaderPack.Frame", kcT); }
             bool netInLevel = inGame;
+            Versus.Frame(inGame && !loading);
             { long kcT = Perf.Now(); Room.Frame(worldId, netInLevel, mcDisabled || !haveMc, Coords.InNether); Perf.Add("Room.Frame", kcT); }
             { long kcT = Perf.Now(); RemotePlayers.Frame(nm, nm != null ? nm.cc : null, netInLevel, mcDisabled || !haveMc); Perf.Add("RemotePlayers.Frame", kcT); }
             { long kcT = Perf.Now(); MinosMode.Frame(nm, netInLevel, paused); Perf.Add("MinosMode.Frame", kcT); }
@@ -578,6 +579,12 @@ namespace Killcraft
                 PvpSetting.Frame();
                 ChatBox.Frame(inGame && !loading, paused, mcDisabled || !haveMc);
                 Skins.OwnFrame(inGame && !loading);
+                PartyRules.Frame();
+                LevelVote.Frame();
+                Score.Frame(nm, inGame && !loading);
+                PartyStyle.Frame(inGame && !loading);
+                KeepRunning();
+                Pings.Frame(nm, inGame && !loading, paused);
                 Perf.Add("Party", kcT);
             }
             { long kcT = Perf.Now(); Voice.Frame(Patches.McScreenOpen || McCommand.Busy || Typing.Active); Perf.Add("Voice", kcT); }
@@ -1010,6 +1017,7 @@ namespace Killcraft
             { long kcT = Perf.Now(); HeldItems.Pose(v1 != null ? v1.cc : null); Perf.Add("HeldItems.Pose", kcT); }
             { long kcT = Perf.Now(); EnemySync.LateFrame(); Perf.Add("EnemySync.LateFrame", kcT); }
             { long kcT = Perf.Now(); RemotePlayers.LateFrame(); Perf.Add("RemotePlayers.LateFrame", kcT); }
+            Hats.LateFrame(inGame);
             { long kcT = Perf.Now(); SmileOs.Frame(inGame && haveMc && mcInWorld); Perf.Add("SmileOs.Frame", kcT); }
         }
 
@@ -1307,6 +1315,25 @@ namespace Killcraft
                     case SandboxSync.Changed:
                         SandboxSync.Handle(from, type, r);
                         break;
+                    case PartyRules.Message:
+                        PartyRules.Handle(from, r);
+                        break;
+                    case LevelVote.Message:
+                        LevelVote.Handle(from, r);
+                        break;
+                    case Score.Message:
+                        Score.Handle(from, r);
+                        break;
+                    case Versus.Message:
+                        Versus.Handle(from, r);
+                        break;
+                    case PartyStyle.PointsMessage:
+                    case PartyStyle.StateMessage:
+                        PartyStyle.Handle(from, type, r);
+                        break;
+                    case Pings.Message:
+                        Pings.Handle(from, r);
+                        break;
                     case ReplayPlayer.ControlMessage:
                     case ReplayPlayer.OfferMessage:
                     case ReplayPlayer.ChunkMessage:
@@ -1316,5 +1343,23 @@ namespace Killcraft
                 }
         }
 
+        // In a party, the game runs in the background too: ULTRAKILL stops when it isn't the window in
+        // front, and with it what it says to the others (they saw this player go quiet: CONNECTING...,
+        // out of the level, back). Out of one: as ULTRAKILL had it.
+        private static bool? ranInBackground;
+
+        private static void KeepRunning()
+        {
+            if (ranInBackground == null)
+            {
+                ranInBackground = Application.runInBackground;
+            }
+            bool want = SteamNet.InLobby || ranInBackground.Value;
+            if (Application.runInBackground != want)
+            {
+                Application.runInBackground = want;
+                Plugin.Log.LogInfo(want ? "party: the game keeps running in the background" : "party: the game pauses in the background again");
+            }
+        }
     }
 }

@@ -48,6 +48,8 @@ namespace Killcraft
             public float ProfileAt = -100f;
             // Their party's code (the world's owner's, its world open).
             public string Code = "";
+            // What their V1 wears (Hats), 0 none.
+            public int Hat;
 
             public byte State;
             public int Hp = 100;
@@ -204,6 +206,7 @@ namespace Killcraft
             }
             m.ColorIndex = Plugin.MyColor.Value;
             m.Code = ServerList.Code;
+            m.Hat = Plugin.Hat.Value;
             m.Body = ParseColor(Plugin.BodyColour.Value);
             m.Lights = ParseColor(Plugin.LightsColour.Value);
             m.Wings = ParseColor(Plugin.WingsColour.Value);
@@ -380,7 +383,7 @@ namespace Killcraft
             m.PaintVersion = version;
         }
 
-        private static string ProfileKey() => $"{Mine.SteamId}|{Mine.SteamName}|{Mine.ColorIndex}|{Skins.LookKey(Mine)}|{Mine.PaintVersion}|{Mine.Code}";
+        private static string ProfileKey() => $"{Mine.SteamId}|{Mine.SteamName}|{Mine.ColorIndex}|{Skins.LookKey(Mine)}|{Mine.PaintVersion}|{Mine.Code}|{Mine.Hat}";
 
         private static void SendProfile()
         {
@@ -408,6 +411,8 @@ namespace Killcraft
                     }
                 }
                 w.Write(m.Code ?? "");
+                // (Newer: their hat.)
+                w.Write((byte)Mathf.Clamp(m.Hat, 0, 255));
             });
         }
 
@@ -469,6 +474,7 @@ namespace Killcraft
                         string code = r.ReadString();
                         i.Code = code.Length > 16 ? "" : code;
                     }
+                    i.Hat = r.BaseStream.Length - r.BaseStream.Position > 0 ? r.ReadByte() : 0;
                     i.ProfileAt = Time.unscaledTime;
                     break;
                 }

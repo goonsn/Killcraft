@@ -16,7 +16,7 @@ namespace Killcraft
     // Listed for everyone (ListWorld 2), the host's Steam friends (1), or nobody (0: invites, codes).
     internal static class ServerList
     {
-        private const string Key = "killcraft", Version = "3";
+        private const string Key = "killcraft", Version = "4";
 
         public sealed class Entry
         {

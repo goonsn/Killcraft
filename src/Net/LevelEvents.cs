@@ -71,6 +71,7 @@ namespace Killcraft
         {
             found.Clear();
             scannedAt.Clear();
+            missing.Clear();
             tramFromOthers.Clear();
             votes.Clear();
             sentIgnites.Clear();
@@ -82,6 +83,7 @@ namespace Killcraft
 
         private static readonly Dictionary<Type, Dictionary<uint, Component>> found = new Dictionary<Type, Dictionary<uint, Component>>();
         private static readonly Dictionary<Type, float> scannedAt = new Dictionary<Type, float>();
+        private static readonly Dictionary<KeyValuePair<Type, uint>, float> missing = new Dictionary<KeyValuePair<Type, uint>, float>();
 
         private static T Find<T>(uint id) where T : Component
         {
@@ -97,6 +99,13 @@ namespace Killcraft
             {
                 return null;
             }
+            // (Looked for in a whole scan lately and not here: not scanned for again. Each scan names
+            // every one of them in the level, hundreds of things to burn in a big one: a stutter.)
+            var miss = new KeyValuePair<Type, uint>(typeof(T), id);
+            if (missing.TryGetValue(miss, out float missedAt) && Time.unscaledTime - missedAt < 30f)
+            {
+                return null;
+            }
             scannedAt[typeof(T)] = Time.unscaledTime;
             foreach (T t in Resources.FindObjectsOfTypeAll<T>())
             {
@@ -105,7 +114,12 @@ namespace Killcraft
                     map[EnemySync.PathId(t.transform)] = t;
                 }
             }
-            return map.TryGetValue(id, out c) && c != null ? (T)c : null;
+            if (map.TryGetValue(id, out c) && c != null)
+            {
+                return (T)c;
+            }
+            missing[miss] = Time.unscaledTime;
+            return null;
         }
 
         public static void Handle(int from, BinaryReader r)

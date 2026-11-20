@@ -48,6 +48,8 @@ namespace Killcraft
         private static readonly Dictionary<uint, Vector3> shown = new Dictionary<uint, Vector3>();
         private static readonly HashSet<uint> deadThere = new HashSet<uint>();
         private static readonly Dictionary<uint, float> wokenSent = new Dictionary<uint, float>();
+        // Who hit each enemy last (this player's id, or another's whose hit came here): who killed it (Score).
+        private static readonly Dictionary<EnemyIdentifier, int> lastHit = new Dictionary<EnemyIdentifier, int>();
         private static float snapshotTimer, rescanAt = -100f, heardAt = -100f, quietUntil;
         private static string scene = "";
         // Applying what the authority says (a death): let it through the puppet guards.
@@ -73,6 +75,7 @@ namespace Killcraft
             deadThere.Clear();
             states.Clear();
             shown.Clear();
+            bodies.Clear();
         }
 
         public static void LevelChanged()
@@ -84,9 +87,11 @@ namespace Killcraft
             byId.Clear();
             states.Clear();
             shown.Clear();
+            bodies.Clear();
             deadThere.Clear();
             dying.Clear();
             wokenSent.Clear();
+            lastHit.Clear();
             rescanAt = -100f;
             templates.Clear();
             templatesAt = -100f;
@@ -176,11 +181,14 @@ namespace Killcraft
         // Anything's place in the level, as a number (WorldSync: glass, breakables).
         public static uint PathId(Transform t) => Fnv(scene + "/" + PathOf(t, null));
 
+        private static readonly List<string> pathParts = new List<string>();
+
         // Each object up to the scene: its name, and which of its parent's children of that name it is.
         private static string PathOf(Transform t, Transform stop)
         {
             RefreshTemplates();
-            var parts = new List<string>();
+            List<string> parts = pathParts;
+            parts.Clear();
             for (; t != null && t != stop; t = t.parent)
             {
                 int same = 0;
@@ -373,9 +381,14 @@ namespace Killcraft
             dying.Clear();
             states.Clear();
             shown.Clear();
+            bodies.Clear();
             byId.Clear();
+            lastHit.Clear();
             rescanAt = -100f;
         }
+
+        private static readonly List<uint> woken = new List<uint>();
+        private static readonly List<EnemyIdentifier> again = new List<EnemyIdentifier>();
 
         public static void Frame()
         {
@@ -407,8 +420,9 @@ namespace Killcraft
             // Ones woken here that the authority hasn't (as far as it said lately): wake them there.
             // Ones the authority has killed, back here (this player started again from a checkpoint):
             // dead again.
-            var woken = new List<uint>();
-            var again = new List<EnemyIdentifier>();
+            // (Kept lists, not made each frame: the garbage collector's pauses are stutters.)
+            woken.Clear();
+            again.Clear();
             foreach (EnemyIdentifier eid in current)
             {
                 if (eid == null || eid.dead || Pvp.Is(eid))
@@ -449,6 +463,15 @@ namespace Killcraft
             }
         }
 
+        private sealed class Body
+        {
+            public EnemyIdentifier Eid;
+            public NavMeshAgent Agent;
+            public Rigidbody Rb;
+        }
+
+        private static readonly Dictionary<uint, Body> bodies = new Dictionary<uint, Body>();
+
         // After ULTRAKILL has moved its enemies this frame: the puppets where the authority has them.
         public static void LateFrame()
         {
@@ -475,12 +498,17 @@ namespace Killcraft
                 shown[kv.Key] = at;
                 Transform t = eid.transform;
                 t.SetPositionAndRotation(at, Quaternion.Slerp(t.rotation, s.Rot, 1f - Mathf.Exp(-20f * Time.unscaledDeltaTime)));
-                NavMeshAgent agent = eid.GetComponent<NavMeshAgent>();
+                // (Its agent and body looked up once, not twice a frame for every enemy.)
+                if (!bodies.TryGetValue(kv.Key, out Body body) || body.Eid != eid)
+                {
+                    bodies[kv.Key] = body = new Body { Eid = eid, Agent = eid.GetComponent<NavMeshAgent>(), Rb = eid.GetComponent<Rigidbody>() };
+                }
+                NavMeshAgent agent = body.Agent;
                 if (agent != null && agent.enabled && agent.isOnNavMesh)
                 {
                     agent.nextPosition = at;
                 }
-                Rigidbody rb = eid.GetComponent<Rigidbody>();
+                Rigidbody rb = body.Rb;
                 if (rb != null && !rb.isKinematic)
                 {
                     rb.position = at;
@@ -657,6 +685,10 @@ namespace Killcraft
                     if (Puppets)
                     {
                         uint id = r.ReadUInt32();
+                        if (r.BaseStream.Length - r.BaseStream.Position >= 4 && r.ReadInt32() == Room.MyId && from == Room.AuthorityId && !ReplayPlayer.Active)
+                        {
+                            Score.Killed();
+                        }
                         deadThere.Add(id);
                         states.Remove(id);
                         EnemyIdentifier eid = Lookup(id, 0.2f);
@@ -706,11 +738,21 @@ namespace Killcraft
             }
         }
 
+        // (Kept, not made for each snapshot: twenty a second.)
+        private static readonly HashSet<uint> seen = new HashSet<uint>();
+        private static readonly List<uint> stale = new List<uint>();
+
         private static void HandleSnapshot(BinaryReader r)
         {
             heardAt = Time.unscaledTime;
             int n = r.ReadInt32();
-            var seen = new HashSet<uint>();
+            // (At most SnapshotMax, each 44 bytes at least: a count past that, or past what the message
+            // holds, isn't a snapshot, and isn't made room for.)
+            if (n < 0 || n > SnapshotMax || 44L * n > r.BaseStream.Length - r.BaseStream.Position)
+            {
+                return;
+            }
+            seen.Clear();
             var order = new uint[n];
             for (int i = 0; i < n; i++)
             {
@@ -769,7 +811,7 @@ namespace Killcraft
                     }
                 }
             }
-            var stale = new List<uint>();
+            stale.Clear();
             foreach (uint id in states.Keys)
             {
                 if (!seen.Contains(id))
@@ -781,6 +823,7 @@ namespace Killcraft
             {
                 states.Remove(id);
                 shown.Remove(id);
+                bodies.Remove(id);
             }
         }
 
@@ -1055,6 +1098,10 @@ namespace Killcraft
                 {
                     eid.hitter = hitter;
                 }
+                if (from >= 0)
+                {
+                    lastHit[eid] = from;
+                }
                 OthersHit = true;
                 eid.DeliverDamage(hit.gameObject, force, point, multiplier, (flags & 1) != 0, crit, null, (flags & 2) != 0, (flags & 4) != 0);
             }
@@ -1257,6 +1304,11 @@ namespace Killcraft
             {
                 return false;
             }
+            // (This player's own hit, not an enemy's on another: whose kill it'd be.)
+            if (!applying && !OthersHit && __instance != null && !__instance.dead && __instance.hitter != "enemy")
+            {
+                lastHit[__instance] = Room.MyId;
+            }
             if (Replay.Recording && __instance != null && !__instance.dead)
             {
                 try
@@ -1345,14 +1397,30 @@ namespace Killcraft
         }
 
         // The authority's enemy died: everyone's dies.
+        // And whose kill it was (this player's: counted, Score; another's: it's told, with the death).
         private static void AfterProcessDeath(EnemyIdentifier __instance, bool __state)
         {
-            if (!__state || !(Authority || Recorder) || __instance == null)
+            if (!__state || __instance == null)
+            {
+                return;
+            }
+            int killer = lastHit.TryGetValue(__instance, out int k) ? k : int.MinValue;
+            lastHit.Remove(__instance);
+            if ((!Room.Shared || Authority) && killer == Room.MyId && !ReplayPlayer.Active && !MinosControl.IsBody(__instance))
+            {
+                Score.Killed();
+            }
+            if (!(Authority || Recorder))
             {
                 return;
             }
             uint id = IdOf(__instance);
-            KillNet.Send(Died, KillNet.ToRoom, w => w.Write(id));
+            KillNet.Send(Died, KillNet.ToRoom, w =>
+            {
+                w.Write(id);
+                // (Newer: whose kill.)
+                w.Write(killer);
+            });
         }
 
         // The authority's enemies go after the nearest player, this one or another.

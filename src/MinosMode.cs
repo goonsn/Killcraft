@@ -454,6 +454,7 @@ namespace Killcraft
                 SendVolunteer();
             }
             inLevelNow = inLevel && nm != null;
+            V1HudOff.Frame(Active && IAmMinos && inLevelNow);
             if (!Active)
             {
                 Hud.Hide();
@@ -527,7 +528,12 @@ namespace Killcraft
                 ToParty();
                 return;
             }
+            if (phase != Phase.Over)
+            {
+                MinosArena.Keep(phase == Phase.Fight);
+            }
             MinosControl.Frame();
+            MinosControl.Report(now - phaseAt, phase == Phase.Fight);
             Hud.Update(now);
         }
 
@@ -568,7 +574,7 @@ namespace Killcraft
                 {
                     goneSince[id] = now;
                 }
-                else if (now - since > 5f)
+                else if (now - since > (InParty(id) ? 30f : 5f))
                 {
                     Plugin.Log.LogInfo($"minos: {id} left: out");
                     SendVerdict(id, false);
@@ -593,12 +599,18 @@ namespace Killcraft
                 {
                     absentSince = now;
                 }
-                else if (now - absentSince > 6f)
+                else if (now - absentSince > (InParty(MinosId) ? 30f : 6f))
                 {
                     Plugin.Log.LogInfo("minos: the Minos player left: the V1s win");
                     End(WinV1, true);
                     return;
                 }
+            }
+            // (Before GO: in the arena, wherever the level's start put this V1.)
+            if ((phase == Phase.Waiting || phase == Phase.Countdown) && nm != null && !nm.dead && MinosArena.Far(nm.transform.position))
+            {
+                Plugin.Log.LogInfo($"minos: this V1 was away from the arena (at {nm.transform.position}): put in it");
+                MinosArena.PlaceV1(nm);
             }
             if (respawnAt > 0f && now >= respawnAt)
             {
@@ -608,6 +620,9 @@ namespace Killcraft
         }
 
         private static bool Present(int id) => id == Room.MyId || Room.Peers.Contains(id);
+
+        // (Still in the party: tabbed out a while (their game stops in the background) or loading, not gone.)
+        private static bool InParty(int id) => Party.Members.Exists(m => m.Id == id);
 
         // GO: Minos woken (on every game, at the Minos player's word).
         private static void Go()
@@ -1372,6 +1387,7 @@ namespace Killcraft
                 }
                 wave.gameObject.SetActive(true);
                 SetActive(wave.gameObject, "Trigger (1)", false);
+                arenaRoom = room;
                 Transform mp = wave.Find("MinosPrime");
                 minos = mp != null ? mp.gameObject : null;
                 MinosControl.Body = minos != null ? minos.GetComponent<MinosPrime>() : null;
@@ -1429,9 +1445,77 @@ namespace Killcraft
             {
                 minos.SetActive(true);
             }
+            Keep(true);
         }
 
-        public static void Forget() => minos = null;
+        public static void Forget()
+        {
+            minos = null;
+            arenaRoom = null;
+            keptTold = 0;
+        }
+
+        private static GameObject arenaRoom;
+
+        // P-1's checkpoint copies the arena when it starts (its copy where it was, played in; the one
+        // set up put away, off, 10000 to the side): Minos is the copy's (it was set up before the copy
+        // was made: the same).
+        private static void Resolve()
+        {
+            if (minos == null || arenaRoom == null || Mathf.Abs(minos.transform.position.x - Center.x) < 2000f)
+            {
+                return;
+            }
+            foreach (MinosPrime m in arenaRoom.GetComponentsInChildren<MinosPrime>(true))
+            {
+                if (m != null && Mathf.Abs(m.transform.position.x - Center.x) < 2000f)
+                {
+                    minos = m.gameObject;
+                    MinosControl.Body = m;
+                    Plugin.Log.LogInfo($"minos: the arena's live copy's Minos ({m.transform.parent?.parent?.name})");
+                    return;
+                }
+            }
+        }
+
+        // Whether a V1's far from the arena (the level put it back at its start).
+        public static bool Far(Vector3 at) => new Vector2(at.x - Center.x, at.z - Center.z).magnitude > 90f || Mathf.Abs(at.y - Center.y) > 80f;
+
+        public static void PlaceV1(NewMovement nm)
+        {
+            int i = Mathf.Max(0, MinosMode.V1s.IndexOf(Room.MyId));
+            Place(nm, SpawnPoint(i), 90f);
+        }
+
+        // The arena kept on: P-1 switches its last room (or what holds Minos) off again after it's set up
+        // - him off with it: his physics never ran (his rest never over: "catching his breath" for good),
+        // and his player's camera, where he is, looked at nothing (a black screen). Before GO his wave and
+        // what's above it; from GO him too.
+        private static int keptTold;
+        private static readonly List<string> turnedOn = new List<string>();
+
+        public static void Keep(bool woken)
+        {
+            Resolve();
+            if (minos == null || Mathf.Abs(minos.transform.position.x - Center.x) > 2000f)
+            {
+                return;
+            }
+            turnedOn.Clear();
+            for (Transform t = woken ? minos.transform : minos.transform.parent; t != null; t = t.parent)
+            {
+                if (!t.gameObject.activeSelf)
+                {
+                    t.gameObject.SetActive(true);
+                    turnedOn.Add(t.name);
+                }
+            }
+            if (turnedOn.Count > 0 && keptTold < 5)
+            {
+                keptTold++;
+                Plugin.Log.LogInfo($"minos: the level switched the arena off ({string.Join(", ", turnedOn)}): back on");
+            }
+        }
 
         // Where V1s come in: across from him, near the shut entrance, spread out.
         public static Vector3 SpawnPoint(int i)
@@ -1481,6 +1565,103 @@ namespace Killcraft
             {
                 t.gameObject.SetActive(on);
             }
+        }
+    }
+
+    // The Minos player's screen: none of V1's HUD - its health and weapons panel, its crosshair, its
+    // style meter (StyleHUD: PartyStyleHud) - he isn't V1 (the round's own HUD is his). Put back after.
+    internal static class V1HudOff
+    {
+        private static readonly AccessTools.FieldRef<HudController, GameObject> altOf = AccessTools.FieldRefAccess<HudController, GameObject>("altHudObj");
+        private static readonly List<HudController> huds = new List<HudController>();
+        private static GameObject crosshair;
+        private static float at = -100f;
+
+        public static bool Off { get; private set; }
+
+        public static void Frame(bool hide)
+        {
+            try
+            {
+                if (!hide)
+                {
+                    if (Off)
+                    {
+                        Restore();
+                    }
+                    return;
+                }
+                if (Off && Time.unscaledTime - at < 0.25f)
+                {
+                    return;
+                }
+                at = Time.unscaledTime;
+                if (!Off || huds.Exists(h => h == null))
+                {
+                    huds.Clear();
+                    huds.AddRange(UnityEngine.Object.FindObjectsOfType<HudController>(true));
+                }
+                if (!Off)
+                {
+                    Off = true;
+                    Plugin.Log.LogInfo($"minos: V1's HUD off on Minos's screen ({huds.Count} HUDs)");
+                }
+                foreach (HudController h in huds)
+                {
+                    if (h == null)
+                    {
+                        continue;
+                    }
+                    Canvas c = h.gunCanvas != null ? h.gunCanvas.GetComponent<Canvas>() : null;
+                    if (c != null && c.enabled)
+                    {
+                        c.enabled = false;
+                    }
+                    GameObject alt = altOf(h);
+                    if (alt != null && alt.activeSelf)
+                    {
+                        alt.SetActive(false);
+                    }
+                }
+                StatsManager sm = MonoSingleton<StatsManager>.Instance;
+                if (sm != null && sm.crosshair != null)
+                {
+                    crosshair = sm.crosshair;
+                    if (crosshair.activeSelf)
+                    {
+                        crosshair.SetActive(false);
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogWarning($"minos: couldn't hide V1's HUD ({e.Message})");
+                Off = hide;
+            }
+        }
+
+        private static void Restore()
+        {
+            Off = false;
+            foreach (HudController h in huds)
+            {
+                try
+                {
+                    if (h != null)
+                    {
+                        h.CheckSituation();
+                    }
+                }
+                catch
+                {
+                }
+            }
+            huds.Clear();
+            if (crosshair != null)
+            {
+                crosshair.SetActive(true);
+            }
+            crosshair = null;
         }
     }
 }

@@ -7,7 +7,7 @@ using UnityEngine.SceneManagement;
 
 namespace Killcraft
 {
-    [BepInPlugin("dev.killcraft", "Killcraft", "2.0.2")]
+    [BepInPlugin("dev.killcraft", "Killcraft", "2.0.3")]
     public sealed class Plugin : BaseUnityPlugin
     {
         internal static ManualLogSource Log;
@@ -80,12 +80,15 @@ namespace Killcraft
         internal static ConfigEntry<int> MyColor;
         internal static ConfigEntry<string> BodyColour, LightsColour, WingsColour;
         internal static ConfigEntry<bool> ReplaysOn;
-        internal static ConfigEntry<bool> PartyHudOn;
+        internal static ConfigEntry<bool> PartyHudOn, PartyStyleOn;
         internal static ConfigEntry<bool> NameTags;
         internal static ConfigEntry<float> HudScale;
         internal static ConfigEntry<bool> ShowChat;
         internal static ConfigEntry<bool> VoiceEffects;
-        internal static ConfigEntry<float> BossHealthPerPlayer;
+        internal static ConfigEntry<float> BossHealthPerPlayer, EnemyHealthPerPlayer;
+        internal static ConfigEntry<int> PartyMode, Hat;
+        internal static ConfigEntry<bool> LevelVote, Scoreboard, Pings, TalkIcons, VersusScore, VersusLayer;
+        internal static ConfigEntry<string> PingKey, ScoreboardKey;
         internal static ConfigEntry<bool> SpectateOnDeath, Revive, SpectateThirdPerson;
         internal static ConfigEntry<float> ReviveSeconds;
         internal static ConfigEntry<bool> VariantGuns;
@@ -207,13 +210,40 @@ namespace Killcraft
             BodyColour = cfg.Bind("Party", "V1Body", "", "Your V1's main colour, as the others see it: a hex colour like 7A3FD1, or empty for V1's own blue.");
             LightsColour = cfg.Bind("Party", "V1Lights", "", "Your V1's lights' colour (hex, or empty for its own yellow).");
             WingsColour = cfg.Bind("Party", "V1Wings", "", "Your V1's wings' glow (hex, or empty for its own orange).");
-            ReplaysOn = cfg.Bind("Replays", "Record", true, "Keep a replay of each run (saved at the level's end, or from the KILLCRAFT panel's REPLAY tab).");
+            ReplaysOn = cfg.Bind("Replays", "Record", true, "Keep a replay of each run (saved at the level's end, or from the REPLAY tab of the panel in the Esc menu).");
             PartyHudOn = cfg.Bind("Party", "PartyHud", true, "In a level: the other party members' cards at the top left (health, checkpoints, skulls, dead, finished).");
+            PartyStyleOn = cfg.Bind("Party", "PartyStyleMeter", true,
+                "Co-op, with others in the level: one style meter the whole party fills, in place of ULTRAKILL's own (each player's own style still counts for their rank).");
             NameTags = cfg.Bind("Party", "NameTags", true, "The other players' names over their V1s.");
             HudScale = cfg.Bind("Party", "HudSize", 1f, "How big the party's cards are, 0.5 to 2.");
             ShowChat = cfg.Bind("Party", "Chat", true, "The party's chat at the bottom left in a level (Enter to type; or T with Minecraft off).");
             BossHealthPerPlayer = cfg.Bind("Multiplayer", "BossHealthPerPlayer", 0.5f,
-                "Bosses' health goes up with more players in the level: this much more for each other player there (0.5: +50% each; 0: off).");
+                "Bosses' health goes up with more players in the level: this much more for each other player there (0.5: +50% each; 0: off). " +
+                "The party host's setting counts for everyone.");
+            EnemyHealthPerPlayer = cfg.Bind("Multiplayer", "EnemyHealthPerPlayer", 0.25f,
+                "Every other enemy's health goes up with more players in the level too: this much more for each other player there " +
+                "(0.25: +25% each; 0: off). The party host's setting counts for everyone.");
+            PartyMode = cfg.Bind("Multiplayer", "GameMode", 0,
+                "Your party's game mode, as its host: 0 co-op (ULTRAKILL's levels together), 1 versus (everyone plays the level on their own, " +
+                "seeing the others: the first to finish wins; in the Cyber Grind the last one standing). Minos Prime is picked on the party screen.");
+            VersusScore = cfg.Bind("Multiplayer", "VersusWinByScore", true,
+                "Versus, as the party's host: the winner is the best of ULTRAKILL's own end-of-level grades (time, kills, style; its rank), " +
+                "then the most style, then the quickest. Off: the first to finish wins.");
+            VersusLayer = cfg.Bind("Multiplayer", "VersusWholeLayer", false,
+                "Versus, as the party's host: a race through the whole layer - nobody waits for the others between levels, each level's " +
+                "time and score added up; the result once everyone's done the layer. Off: each level is its own race, and the party " +
+                "goes on together once everyone's finished it.");
+            LevelVote = cfg.Bind("Multiplayer", "LevelVote", false,
+                "Your party, as its host: everyone votes on the next level from the party screen; you start the winner (or any other).");
+            Scoreboard = cfg.Bind("Party", "Scoreboard", true,
+                "The party's scoreboard (kills, style, deaths, revives, best rank) at the end of a level, and while ScoreboardKey is held in one.");
+            ScoreboardKey = cfg.Bind("Party", "ScoreboardKey", "Tab", "Hold in a level to see the party's scoreboard. A key name (Tab, CapsLock, ...).");
+            Pings = cfg.Bind("Party", "Pings", true, "Mark an enemy or a spot for the others in your level with PingKey.");
+            PingKey = cfg.Bind("Party", "PingKey", "Mouse3",
+                "Marks what you look at (an enemy, or the spot) for the others: Mouse3 is the wheel's button; or Mouse4 / Mouse5, or a key name (G, ...).");
+            TalkIcons = cfg.Bind("Party", "TalkingIcons", true, "A speaker over whoever's talking on voice chat, and on their card.");
+            Hat = cfg.Bind("Party", "Hat", 0, "What your V1 wears, as the others (and you, in third person) see it: 0 none, 1 halo, 2 horns, 3 crown, " +
+                "4 party hat, 5 antenna, 6 top hat, 7 visor.");
             SpectateOnDeath = cfg.Bind("Multiplayer", "SpectateOnDeath", true,
                 "Dying while someone else in the party is still alive in the level: watch them until one of them reaches a checkpoint, then come back there (instead of restarting).");
             SpectateThirdPerson = cfg.Bind("Multiplayer", "SpectateThirdPerson", false,

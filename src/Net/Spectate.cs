@@ -51,6 +51,7 @@ namespace Killcraft
 
         private static Canvas canvas;
         private static TextMeshProUGUI title, hint, center, prompt;
+        private static UnityEngine.UI.Image cover;
 
         public static bool Active => active;
 
@@ -174,7 +175,6 @@ namespace Killcraft
                 target = pendingWatch;
                 pendingWatch = int.MinValue;
                 Plugin.Log.LogInfo($"spectate: watching {Profiles.NameOf(target)} from the start (Esc, JOIN, to play)");
-                PartyChat.System($"Watching {Typing.Escape(Profiles.NameOf(target))}: Esc, then JOIN, to play.");
                 return;
             }
             if (Sandbox)
@@ -336,6 +336,7 @@ namespace Killcraft
             pendingWatch = id;
             pendingScene = scene;
             pendingAt = Time.unscaledTime;
+            arrivedAt = -1f;
             Plugin.Log.LogInfo($"spectate: going to {scene} to watch {Profiles.NameOf(id)}");
             Party.LoadQuiet(scene);
         }
@@ -362,7 +363,13 @@ namespace Killcraft
                 Begin(nm);
                 return;
             }
-            if (!nm.activated && Time.unscaledTime - pendingAt < 25f)
+            // (Down as soon as the level's there - not once V1's dropped in and been handed over: that
+            // was the level's start played on this screen, falling down its tunnel, then dying.)
+            if (arrivedAt < 0f)
+            {
+                arrivedAt = Time.unscaledTime;
+            }
+            if (Time.unscaledTime - arrivedAt < 0.3f)
             {
                 watching = false;
                 return;
@@ -377,10 +384,17 @@ namespace Killcraft
             }
             if (!active)
             {
+                // (Not down yet: tried again, the screen still covered, until it is or V1's handed over.)
                 watching = false;
-                pendingWatch = int.MinValue;
+                if (nm.activated && Time.unscaledTime - arrivedAt > 5f)
+                {
+                    Plugin.Log.LogWarning("spectate: couldn't put V1 down to watch");
+                    pendingWatch = int.MinValue;
+                }
             }
         }
+
+        private static float arrivedAt = -1f;
 
         // ESC while spectating: ULTRAKILL's pause menu with JOIN (watching from the menu: in, where
         // they are, as UltraLink's spectators join) and STOP SPECTATING (watching: back to the menu;
@@ -388,11 +402,13 @@ namespace Killcraft
         private static void Menu(bool inLevel)
         {
             PauseButtons.Spectating(active && watching && inLevel, Join, StopSpectating);
+            // (VERSUS: everyone plays the level on their own - nobody to join into.)
+            PauseButtons.Joinable(!Versus.On);
         }
 
         private static void Join()
         {
-            if (!active || !watching)
+            if (!active || !watching || Versus.On)
             {
                 return;
             }
@@ -590,6 +606,7 @@ namespace Killcraft
                     reviving.Remove(id);
                     Plugin.Log.LogInfo($"spectate: revived {Profiles.NameOf(id)}");
                     PartyChat.System($"You revived {Typing.Escape(Profiles.NameOf(id))}.");
+                    Score.Revived();
                 }
             }
             if (send)
@@ -782,7 +799,8 @@ namespace Killcraft
 
         private static void Draw(bool inLevel, bool paused)
         {
-            bool show = inLevel && !paused && (active || shownReviving != int.MinValue);
+            bool arriving = inLevel && pendingWatch != int.MinValue && !active && SceneHelper.CurrentScene == pendingScene;
+            bool show = inLevel && (arriving || (!paused && (active || shownReviving != int.MinValue)));
             if (!show)
             {
                 if (canvas != null && canvas.gameObject.activeSelf)
@@ -799,9 +817,21 @@ namespace Killcraft
                 hint = Ui.Text(canvas.transform, "", 18f, new Color(0.8f, 0.8f, 0.8f), TextAlignmentOptions.Center, 0f, 912f, 1920f, 30f);
                 center = Ui.Text(canvas.transform, "", 26f, Color.white, TextAlignmentOptions.Center, 0f, 640f, 1920f, 40f);
                 prompt = Ui.Text(canvas.transform, "", 24f, Color.white, TextAlignmentOptions.Center, 0f, 150f, 1920f, 36f);
+                cover = Ui.Picture(Ui.Fill(canvas.transform, "Cover"), null, Color.black);
+                cover.transform.SetAsFirstSibling();
+                cover.raycastTarget = false;
             }
             prompt.text = "";
             canvas.gameObject.SetActive(true);
+            cover.enabled = arriving;
+            if (arriving)
+            {
+                string who = Typing.Escape(Profiles.NameOf(pendingWatch).ToUpperInvariant());
+                title.text = $"<color=#FFA030>SPECTATING</color>  <color=#{Ui.Hex(Profiles.Of(pendingWatch).Color)}>{who}</color>";
+                hint.text = "";
+                center.text = "";
+                return;
+            }
             if (active)
             {
                 string who = target != int.MinValue ? Typing.Escape(Profiles.NameOf(target).ToUpperInvariant()) : "...";
@@ -813,12 +843,12 @@ namespace Killcraft
                     : cyber
                     ? "LEFT / RIGHT CLICK: SWITCH  ·  BACK WHEN THE WAVE'S CLEARED" + view
                     : watching
-                    ? "LEFT / RIGHT CLICK: SWITCH  ·  ESC: JOIN" + view
+                    ? "LEFT / RIGHT CLICK: SWITCH" + view
                     : Sandbox
                     ? "LEFT / RIGHT CLICK: SWITCH  ·  R: RESPAWN" + (Plugin.Revive.Value ? " (OR WAIT FOR A REVIVE)" : "")
                     : "LEFT / RIGHT CLICK: SWITCH  ·  BACK AT THE NEXT CHECKPOINT" + (Plugin.Revive.Value ? " OR WHEN REVIVED" : "") + "  ·  ESC > CHECKPOINT: RESPAWN";
                 center.text = watching
-                    ? (Time.unscaledTime - startedAt < 6f ? "ESC, THEN JOIN, TO PLAY" : "")
+                    ? ""
                     : reviver != int.MinValue
                     ? $"BEING REVIVED BY {Typing.Escape(Profiles.NameOf(reviver).ToUpperInvariant())}  {Bar(revived)}"
                     : Time.unscaledTime - startedAt < 2.5f ? "<color=#E05040>YOU DIED</color>" : "";

@@ -754,7 +754,7 @@ namespace Killcraft
         {
             try
             {
-                if (Time.unscaledTime - effectsAt > 2f)
+                if (Time.unscaledTime - effectsAt > 1f)
                 {
                     effectsAt = Time.unscaledTime;
                     effects.Clear();
@@ -783,6 +783,18 @@ namespace Killcraft
             catch
             {
             }
+        }
+
+        // (V1's dash and slide lines are made as it dashes or slides, and gone in under a second: looked
+        // for again at once, or the sun drew their shadows across the floor.)
+        [HarmonyLib.HarmonyPatch]
+        private static class EffectsMade
+        {
+            [HarmonyLib.HarmonyPatch(typeof(NewMovement), "TryDash"), HarmonyLib.HarmonyPostfix]
+            private static void Dashed() => effectsAt = -100f;
+
+            [HarmonyLib.HarmonyPatch(typeof(NewMovement), "StartSlide"), HarmonyLib.HarmonyPostfix]
+            private static void Slid() => effectsAt = -100f;
         }
 
         private static void Hide(Renderer r)

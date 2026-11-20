@@ -121,6 +121,7 @@ namespace Killcraft
                 now.Add(m);
             }
             string before = HostName();
+            int beforeId = HostId();
             Members.Clear();
             Members.AddRange(now);
             heardAt = Time.unscaledTime;
@@ -128,7 +129,21 @@ namespace Killcraft
             if (before != after && after != "")
             {
                 Plugin.Log.LogInfo($"party: {after} is the party host ({Members.Count} in the world)");
+                bool stillHere = Members.Exists(m => m.Id == beforeId);
+                PartyRules.HostChanged(before, stillHere, after, HostId() == Room.MyId);
             }
+        }
+
+        public static int HostId()
+        {
+            foreach (Member m in Members)
+            {
+                if (m.PartyHost)
+                {
+                    return m.Id;
+                }
+            }
+            return 0;
         }
 
         private static string HostName()
@@ -182,6 +197,13 @@ namespace Killcraft
             // (Only from the menu, or from the level they were in with the host: someone playing a
             // level of their own isn't pulled out of it.)
             string here = SceneHelper.CurrentScene ?? "";
+            // (VERSUS: someone still racing isn't pulled out of their run - they follow once they've finished.)
+            if (Versus.KeepsPlaying(here))
+            {
+                Plugin.Log.LogInfo($"party: {who} went on to {scene}; still racing {here}");
+                ChatLines.Add($"{who} went on to {LevelName(scene)}: finish yours, then you follow");
+                return;
+            }
             Profiles.Info host = Profiles.Of(from);
             if (IsLevel(here) && host.Scene != here)
             {

@@ -37,6 +37,7 @@ namespace Killcraft
         private static readonly Dictionary<ulong, Member> members = new Dictionary<ulong, Member>();
         private static readonly HashSet<ulong> kicked = new HashSet<ulong>();
         private static readonly HashSet<ulong> inLobby = new HashSet<ulong>();
+        private static readonly List<ulong> left = new List<ulong>();
         private static float roomsAt = -100f, lobbyReadAt = -100f;
         private static bool roomsChanged, hooked;
         private static ulong routedFor;
@@ -357,13 +358,19 @@ namespace Killcraft
                     roomsChanged = true;
                 }
                 ReadLobby();
-                foreach (ulong s in new List<ulong>(members.Keys))
+                // (A kept list, not a new one each frame.)
+                left.Clear();
+                foreach (ulong s in members.Keys)
                 {
                     if (!inLobby.Contains(s))
                     {
-                        members.Remove(s);
-                        roomsChanged = true;
+                        left.Add(s);
                     }
+                }
+                foreach (ulong s in left)
+                {
+                    members.Remove(s);
+                    roomsChanged = true;
                 }
                 if (roomsChanged || Time.unscaledTime - roomsAt > 2f)
                 {

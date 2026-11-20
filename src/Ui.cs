@@ -428,6 +428,37 @@ namespace Killcraft
             "..######..",
             "..#.##.#..");
 
+        // A speaker with its sound (talking on voice chat).
+        private static Sprite speaker;
+        public static Sprite Speaker => speaker != null ? speaker : speaker = Pixels(
+            ".....#......",
+            "....##...#..",
+            "...###....#.",
+            "######.#..#.",
+            "######..#.#.",
+            "######..#.#.",
+            "######.#..#.",
+            "...###....#.",
+            "....##...#..",
+            ".....#......");
+
+        // A ping's mark: a diamond, open in the middle.
+        private static Sprite pingMark;
+        public static Sprite PingMark => pingMark != null ? pingMark : pingMark = Pixels(
+            "......#......",
+            ".....###.....",
+            "....#####....",
+            "...###.###...",
+            "..###...###..",
+            ".###.....###.",
+            "###.......###",
+            ".###.....###.",
+            "..###...###..",
+            "...###.###...",
+            "....#####....",
+            ".....###.....",
+            "......#......");
+
         // An eye (spectating).
         public static Sprite Eye => eye != null ? eye : eye = Pixels(
             "....#####....",
@@ -604,6 +635,25 @@ namespace Killcraft
             sw.Changed = changed;
             sw.Set(on);
             return sw;
+        }
+
+        // A checkbox as ULTRAKILL's options have them: its small outlined box, filled white inside when on;
+        // grey under the mouse.
+        public static UiCheck Check(Transform parent, float x, float y, bool on, Action<bool> changed, float size = 30f)
+        {
+            RectTransform rt = Rect(parent, "Check", x, y, size, size);
+            UnityEngine.UI.Image box = Picture(rt, SmallLine, White);
+            Sliced(box, 2.5f);
+            box.raycastTarget = true;
+            float inset = Mathf.Round(size * 0.24f);
+            UnityEngine.UI.Image mark = Picture(Fill(rt, "Mark", inset), SmallFill, White);
+            Sliced(mark, 2f);
+            var c = rt.gameObject.AddComponent<UiCheck>();
+            c.Box = box;
+            c.Mark = mark;
+            c.Changed = changed;
+            c.Set(on);
+            return c;
         }
 
         // A dropdown (UltraLink's): the choice and a small triangle after it; clicked, the choices in a
@@ -1151,6 +1201,56 @@ namespace Killcraft
             {
                 Ui.Place(Knob, on ? 26f : 4f, 4f, 16f, 16f);
             }
+        }
+
+        public void OnPointerClick(PointerEventData e)
+        {
+            Ui.ClickSound();
+            Set(!On);
+            Changed?.Invoke(On);
+        }
+    }
+
+    internal sealed class UiCheck : MonoBehaviour, IPointerClickHandler, IPointerEnterHandler, IPointerExitHandler
+    {
+        public Image Box, Mark;
+        public Action<bool> Changed;
+        public bool On;
+        private bool over;
+
+        public void Set(bool on)
+        {
+            On = on;
+            if (Mark != null)
+            {
+                Mark.enabled = on;
+            }
+            Tint();
+        }
+
+        private void Tint()
+        {
+            Color c = over ? new Color(0.55f, 0.55f, 0.55f) : Color.white;
+            if (Box != null)
+            {
+                Box.color = c;
+            }
+            if (Mark != null)
+            {
+                Mark.color = c;
+            }
+        }
+
+        public void OnPointerEnter(PointerEventData e)
+        {
+            over = true;
+            Tint();
+        }
+
+        public void OnPointerExit(PointerEventData e)
+        {
+            over = false;
+            Tint();
         }
 
         public void OnPointerClick(PointerEventData e)

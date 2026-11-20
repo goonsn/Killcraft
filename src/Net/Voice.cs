@@ -60,8 +60,10 @@ namespace Killcraft
         }
 
         private static readonly Dictionary<int, Speaker> speakers = new Dictionary<int, Speaker>();
-        private static bool recording, failed;
-        private static float sentAt = -100f;
+        private static bool recording, transmitting, failed;
+        private static float sentAt = -100f, releasedAt = -100f;
+        // (After letting go of the key: what Steam had still coming in, sent for this long.)
+        private const float Tail = 0.3f;
         private static UnityEngine.InputSystem.Key key = UnityEngine.InputSystem.Key.None;
         private static string keyName = "";
         private static readonly MemoryStream pcm = new MemoryStream();
@@ -74,8 +76,8 @@ namespace Killcraft
         public static bool IsSpeaking(int id) => speakers.TryGetValue(id, out Speaker s) && Time.unscaledTime - s.HeardAt < 0.35f;
 
         // This player's microphone is on (and Steam's sending what it hears).
-        public static bool Talking => recording && Time.unscaledTime - sentAt < 0.4f;
-        public static bool MicOpen => recording;
+        public static bool Talking => transmitting && Time.unscaledTime - sentAt < 0.4f;
+        public static bool MicOpen => transmitting;
 
         // Whose voice is coming in now.
         public static IEnumerable<int> Speaking()
@@ -111,21 +113,35 @@ namespace Killcraft
         {
             bool steam = ServerList.SteamUp;
             int mode = Plugin.VoiceMode.Value;
-            bool want = steam && (KillNet.Connected || TestingMic) && (mode != 0 || TestingMic) && !typing && (mode == 2 || TestingMic || KeyHeld());
-            if (want != recording && steam)
+            // Steam's recording stays on all the while voice chat can be used (in a party, voice on), not
+            // switched with the push-to-talk key: starting it opens the microphone, and the game waited
+            // for that (130 to 220 ms) at each press. What comes in while the key isn't held is thrown away.
+            bool armed = steam && (KillNet.Connected || TestingMic) && (mode != 0 || TestingMic);
+            bool send = armed && !typing && (mode == 2 || TestingMic || KeyHeld());
+            if (armed != recording && steam)
             {
-                SteamUser.VoiceRecord = want;
-                recording = want;
+                SteamUser.VoiceRecord = armed;
+                recording = armed;
             }
             if (!steam)
             {
-                recording = false;
+                recording = transmitting = false;
                 return;
             }
+            if (transmitting && !send)
+            {
+                releasedAt = Time.unscaledTime;
+            }
+            transmitting = send;
             // (Also just after letting go: the last of it.)
-            if (SteamUser.HasVoiceData)
+            bool sending = send || Time.unscaledTime - releasedAt < Tail;
+            if (recording && SteamUser.HasVoiceData)
             {
                 byte[] data = SteamUser.ReadVoiceDataBytes();
+                if (!sending)
+                {
+                    return;
+                }
                 if (data != null && data.Length > 0 && data.Length < 20000 && TestingMic)
                 {
                     Hear(MeId, data);
@@ -377,7 +393,7 @@ namespace Killcraft
                 return;
             }
             string line = "";
-            if (Talking || (recording && Plugin.VoiceMode.Value == 1))
+            if (Talking || (transmitting && Plugin.VoiceMode.Value == 1))
             {
                 line = "<color=#ff3030>● MIC</color>";
             }

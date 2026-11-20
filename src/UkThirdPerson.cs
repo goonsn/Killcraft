@@ -28,6 +28,9 @@ namespace Killcraft
 
         private static int mode;  // 0 first person, 1 behind, 2 front
         private static bool on;
+
+        // V1's own body is shown (Hats: its hat too).
+        public static bool On => on;
         private static UnityEngine.InputSystem.Key key = UnityEngine.InputSystem.Key.None;
         private static CameraController cc;
         private static readonly List<(Transform T, int Layer)> bodyLayers = new List<(Transform, int)>();

@@ -144,7 +144,7 @@ namespace Killcraft
 
         public static void Frame(NewMovement nm, CameraController cc, bool inLevel, bool ultrakillMode)
         {
-            if ((sendTimer -= Time.unscaledDeltaTime) <= 0f && Room.Sharing && inLevel && nm != null)
+            if ((sendTimer -= Time.unscaledDeltaTime) <= 0f && (Room.Sharing || Room.Ghosts) && inLevel && nm != null)
             {
                 float dt = SendEvery - sendTimer;
                 sendTimer = SendEvery;
@@ -1245,6 +1245,19 @@ namespace Killcraft
         public static EnemyTarget TargetOf(int id)
         {
             return remotes.TryGetValue(id, out Remote r) && r.Target != null && r.Marker != null && r.Marker.activeSelf ? r.Target : null;
+        }
+
+        // The others' V1 bodies here, shown now, and which way each faces (Hats).
+        public static IEnumerable<(int Id, V1Body Body, float Yaw)> V1Bodies()
+        {
+            foreach (var kv in remotes)
+            {
+                Remote r = kv.Value;
+                if (r.Placed && r.V1 != null && r.V1.Root != null && r.V1.Root.activeInHierarchy && Time.unscaledTime - r.At < 3f)
+                {
+                    yield return (kv.Key, r.V1, r.ShownYaw);
+                }
+            }
         }
 
         public static bool HeadOf(int id, out Vector3 at)

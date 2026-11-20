@@ -183,11 +183,36 @@ namespace Killcraft
             public Renderer R;
             public Material[] Original;
             public string Shown = "";
+            // (What this put on it last: something else putting others on since is seen.)
+            public Material[] Applied;
         }
 
         private static readonly Body ownBody = new Body();
         private static readonly Dictionary<string, Material> recoloured = new Dictionary<string, Material>();
         private static readonly Dictionary<string, Texture2D> retextured = new Dictionary<string, Texture2D>();
+        // Each recoloured copy's own V1 material. A body copied from this player's (another player's
+        // V1 is a copy of it: V1Body) carries this player's look on it; its "original" materials have
+        // to be V1's own, or the others wore this player's colour (theirs plain, or recoloured from it).
+        private static readonly Dictionary<Material, Material> originOf = new Dictionary<Material, Material>();
+
+        private static Material Origin(Material m)
+        {
+            for (int i = 0; i < 4 && m != null && originOf.TryGetValue(m, out Material o) && o != null; i++)
+            {
+                m = o;
+            }
+            return m;
+        }
+
+        private static Material[] Origins(Material[] ms)
+        {
+            var o = new Material[ms.Length];
+            for (int i = 0; i < ms.Length; i++)
+            {
+                o[i] = Origin(ms[i]);
+            }
+            return o;
+        }
 
         public static string LookKey(Profiles.Info who) => who == null ? "" : $"{K(who.Body)}|{K(who.Lights)}|{K(who.Wings)}";
 
@@ -205,8 +230,9 @@ namespace Killcraft
                     if (r.name == "v1_mdl")
                     {
                         body.R = r;
-                        body.Original = r.sharedMaterials;
+                        body.Original = Origins(r.sharedMaterials);
                         body.Shown = "";
+                        body.Applied = null;
                         break;
                     }
                 }
@@ -216,6 +242,13 @@ namespace Killcraft
                 }
             }
             string key = LookKey(who);
+            Material[] now = body.R.sharedMaterials;
+            if (body.Applied != null && !Same(now, body.Applied))
+            {
+                // (ULTRAKILL, or a respawn, put its own on since: those are the originals now.)
+                body.Original = Origins(now);
+                body.Shown = "";
+            }
             if (body.Shown == key)
             {
                 return;
@@ -224,6 +257,7 @@ namespace Killcraft
             if (Plain(who))
             {
                 body.R.sharedMaterials = body.Original;
+                body.Applied = body.Original;
                 return;
             }
             var mats = new Material[body.Original.Length];
@@ -232,6 +266,7 @@ namespace Killcraft
                 mats[i] = Recolour(body.Original[i], who);
             }
             body.R.sharedMaterials = mats;
+            body.Applied = mats;
         }
 
         // Copies of looks nobody wears now (a colour tried on the wheel, a player gone): freed a few
@@ -271,6 +306,7 @@ namespace Killcraft
                 if (recoloured[k] != null)
                 {
                     stale.Add((recoloured[k], Time.unscaledTime));
+                    originOf.Remove(recoloured[k]);
                 }
                 recoloured.Remove(k);
             }
@@ -309,6 +345,7 @@ namespace Killcraft
 
         private static Material Recolour(Material m, Profiles.Info who)
         {
+            m = Origin(m);
             if (m == null)
             {
                 return null;
@@ -339,6 +376,7 @@ namespace Killcraft
                 Plugin.Log.LogWarning($"skins: couldn't recolour {m.name} ({e.Message})");
             }
             recoloured[key] = copy;
+            originOf[copy] = m;
             return copy;
         }
 
@@ -446,7 +484,7 @@ namespace Killcraft
                     Material[] has = r.sharedMaterials;
                     arms.TryGetValue(r, out var was);
                     // (Its materials as ours left them, or new ones ULTRAKILL put on since.)
-                    Material[] original = was.Shown != null && Same(has, was.Shown) ? was.Original : has;
+                    Material[] original = was.Shown != null && Same(has, was.Shown) ? was.Original : Origins(has);
                     if (!AnyArm(original))
                     {
                         arms.Remove(r);

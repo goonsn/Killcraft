@@ -140,9 +140,23 @@ namespace Killcraft
             }
             if (why == null && owner != me && owner != 0)
             {
-                if (failedFor == owner)
+                // (Others still in it too: the host may be the one gone - Steam then hands the party to
+                // someone still here, and it goes on (PartyRules). Left only if the host stays silent.)
+                int members = 0;
+                try
+                {
+                    members = lobby.MemberCount;
+                }
+                catch (Exception)
+                {
+                }
+                if (failedFor == owner && members <= 2)
                 {
                     why = "Steam couldn't reach the host";
+                }
+                else if (failedFor == owner)
+                {
+                    Plugin.Log.LogInfo("rejoin: Steam couldn't reach the host; waiting for Steam to hand the party on (or the host to come back)");
                 }
                 else if (now - Mathf.Max(SteamNet.OwnerHeardAt, quietFrom) > SilentFor)
                 {

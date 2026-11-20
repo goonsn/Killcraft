@@ -20,6 +20,16 @@ namespace Killcraft
 
         public static bool LaidOut => laidOut;
 
+        // JOIN clickable or not (VERSUS: not; greyed as ULTRAKILL greys a button).
+        public static void Joinable(bool can)
+        {
+            Button b = join != null ? join.GetComponent<Button>() : null;
+            if (b != null && b.interactable != can)
+            {
+                b.interactable = can;
+            }
+        }
+
         // Every frame: laid out for watching, or as ULTRAKILL made it.
         public static void Spectating(bool on, Action joinClick, Action stopClick)
         {

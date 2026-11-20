@@ -131,7 +131,9 @@ namespace Killcraft
             }
             bool record = Replay.Recording && Replay.Keeps(type) && route != ToPlayer && route != ToServer && route != ToMinecraft;
             // (Alone in the level: the level's goings-on are only kept for the replay, not sent.)
-            bool solo = !Killcraft.Room.Shared && Replay.LevelType(type) && route != ToServer && route != ToMinecraft;
+            // (VERSUS: each on their own, only their V1s seen by the others.)
+            bool solo = !Killcraft.Room.Shared && Replay.LevelType(type) && route != ToServer && route != ToMinecraft
+                && !(Killcraft.Room.Ghosts && Versus.GhostType(type));
 #if KILLNET_ONLY
             bool can = route != ToMinecraft && SteamNet.InLobby;
 #else

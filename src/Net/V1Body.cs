@@ -32,6 +32,11 @@ namespace Killcraft
         private static bool loggedParts, noneHere;
 
         public GameObject Root;
+        public Transform Head => head;
+        public float Height = 4.6f, HeadTop = 0.5f;
+
+        // (Hats: this player's own V1's head, its PlayerAnimations'.)
+        internal static Transform HeadOfAnimations(PlayerAnimations a) => a != null ? headOf(a) : null;
         private Transform model, chest, head, rightArm, leftArm;
         private Quaternion restRotation;
         private Animator anim;
@@ -176,6 +181,9 @@ namespace Killcraft
                 sizeUp = Mathf.Clamp(TallBlocks * Coords.U / tall, 1f, 3.5f);
                 model.localScale = scale * sizeUp;
             }
+            // (How tall it's drawn, and how far the top of its head is above its head's bone: where a hat sits, Hats.)
+            Height = Mathf.Clamp(tall * sizeUp, 0.5f, 30f);
+            HeadTop = Mathf.Clamp(model.position.y + Height - head.position.y, 0f, Height * 0.3f);
             anim = copy.GetComponent<Animator>();
             if (anim != null)
             {
@@ -402,6 +410,18 @@ namespace Killcraft
                 {
                     parts.AddRange(guns.Made);
                     looked = "";
+                    ghostScanAt = -100f;
+                }
+                // (Not while this player spectates: whoever's watched as they are - their guns, their
+                // arms - and the body hidden from their eyes left hidden.)
+                if (Versus.On && !Spectate.Active)
+                {
+                    Ghost(who);
+                    return;
+                }
+                if (ghosted.Count > 0)
+                {
+                    Unghost();
                 }
                 Skins.SkinBody(Root, who, skin);
                 string key = $"{weapon}|{alt}|{variant}|{who.PaintVersion}";
@@ -419,6 +439,148 @@ namespace Killcraft
         }
 
         private VariantGuns guns;
+
+        // ---- VERSUS: a ghost ----
+
+        // In VERSUS everyone plays the level on their own: the others are only there to race, drawn
+        // as ghosts - a dim see-through blue, no shadow - not as solid V1s. Each of its
+        // renderers' own materials kept, for when it's not a ghost any more.
+        private readonly Dictionary<Renderer, (Material[] Mats, ShadowCastingMode Shadows)> ghosted =
+            new Dictionary<Renderer, (Material[], ShadowCastingMode)>();
+        private float ghostScanAt = -100f;
+        private string ghostKey = "";
+        private static Shader ghostShader;
+        private static bool ghostShaderLooked;
+        private static readonly Dictionary<string, Material> ghostMats = new Dictionary<string, Material>();
+
+        private void Ghost(Profiles.Info who)
+        {
+            Color c = who.Color;
+            string key = ColorUtility.ToHtmlStringRGB(c);
+            float now = Time.unscaledTime;
+            if (key == ghostKey && now - ghostScanAt < 0.5f)
+            {
+                return;
+            }
+            ghostKey = key;
+            ghostScanAt = now;
+            foreach (Renderer r in Root.GetComponentsInChildren<Renderer>(true))
+            {
+                if (r == null || r is ParticleSystemRenderer || r is TrailRenderer || r is LineRenderer)
+                {
+                    continue;
+                }
+                if (!ghosted.TryGetValue(r, out var was))
+                {
+                    ghosted[r] = was = (r.sharedMaterials, r.shadowCastingMode);
+                }
+                var want = new Material[was.Mats.Length];
+                for (int i = 0; i < want.Length; i++)
+                {
+                    want[i] = GhostOf(was.Mats[i], c);
+                }
+                if (!SameMats(r.sharedMaterials, want))
+                {
+                    r.sharedMaterials = want;
+                }
+                // (Hidden - only its shadow, RemotePlayers - stays hidden.)
+                if (r.shadowCastingMode != ShadowCastingMode.ShadowsOnly)
+                {
+                    r.shadowCastingMode = ShadowCastingMode.Off;
+                }
+            }
+        }
+
+        private void Unghost()
+        {
+            foreach (var kv in ghosted)
+            {
+                if (kv.Key != null)
+                {
+                    kv.Key.sharedMaterials = kv.Value.Mats;
+                    if (kv.Key.shadowCastingMode == ShadowCastingMode.Off)
+                    {
+                        kv.Key.shadowCastingMode = kv.Value.Shadows;
+                    }
+                }
+            }
+            ghosted.Clear();
+            ghostKey = "";
+            // (Its guns' paint put back on.)
+            looked = "";
+        }
+
+        private static bool SameMats(Material[] a, Material[] b)
+        {
+            if (a == null || b == null || a.Length != b.Length)
+            {
+                return false;
+            }
+            for (int i = 0; i < a.Length; i++)
+            {
+                if (a[i] != b[i])
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        // The ghost's look, for every part of every other player: a dim, see-through blue, no picture
+        // on it (not a faded copy of them: a ghost), the same for everyone.
+        private static readonly Color GhostTint = new Color(0.13f, 0.27f, 0.5f, 0.15f);  // (the shader doubles it)
+
+        private static Material GhostOf(Material m, Color c)
+        {
+            Shader s = GhostShader();
+            if (s == null)
+            {
+                return m;
+            }
+            if (ghostMats.TryGetValue("ghost", out Material g) && g != null)
+            {
+                return g;
+            }
+            g = new Material(s) { name = "Killcraft versus ghost", renderQueue = 3100 };
+            g.mainTexture = Texture2D.whiteTexture;
+            if (g.HasProperty("_TintColor"))
+            {
+                g.SetColor("_TintColor", GhostTint);
+            }
+            else
+            {
+                g.color = GhostTint;
+            }
+            ghostMats["ghost"] = g;
+            return g;
+        }
+
+        private static Shader GhostShader()
+        {
+            if (ghostShader != null || ghostShaderLooked)
+            {
+                return ghostShader;
+            }
+            ghostShaderLooked = true;
+            ghostShader = Shader.Find("Legacy Shaders/Particles/Alpha Blended");
+            if (ghostShader == null)
+            {
+                foreach (Shader s in Resources.FindObjectsOfTypeAll<Shader>())
+                {
+                    if (s != null && s.name.EndsWith("Particles/Alpha Blended"))
+                    {
+                        ghostShader = s;
+                        break;
+                    }
+                }
+            }
+            if (ghostShader == null)
+            {
+                ghostShader = Shader.Find("Sprites/Default");
+            }
+            Plugin.Log.LogInfo($"versus: the others drawn as ghosts ({(ghostShader != null ? ghostShader.name : "no see-through shader here: as they are")})");
+            return ghostShader;
+        }
 
         // What ULTRAKILL told their PlayerAnimations (heard: from them; else made up from their state).
         public void Move(byte move, float value, bool heard = true)
@@ -501,7 +663,7 @@ namespace Killcraft
 
         private static void Send(byte move, float value)
         {
-            if (!Room.Sharing)
+            if (!Room.Sharing && !Room.Ghosts)
             {
                 return;
             }

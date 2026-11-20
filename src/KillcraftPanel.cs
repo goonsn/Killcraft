@@ -9,16 +9,21 @@ namespace Killcraft
     // The KILLCRAFT panel: KILLCRAFT under ULTRAKILL's pause menu (and SETTINGS in the party menu)
     // opens it. A panel framed twice in Killcraft's red (corners cut), its header (KILLCRAFT, the
     // level and difficulty, X), tabs: PARTY (everyone here: their picture, crown, health, ping, mute
-    // and volume; the party's code, invites, leaving), VOICE, REPLAY and HUD (the settings are in
-    // OPTIONS > KILLCRAFT, as UltraLink's).
+    // and volume; the party's code, invites, leaving), RULES (the party host's: game mode, versus,
+    // PvP, ...), GAME (this player's: following the host, dying, the scoreboard, pings, replays,
+    // shaders), VOICE, LOOK (their V1's colour, hat, the HUD) and REPLAY. Every setting is here, with
+    // ULTRAKILL's own options' controls (checkboxes, dropdowns, sliders); OPTIONS > KILLCRAFT still has them too.
     //
     // ULTRAKILL's pause menu stays up underneath, only made invisible: its "pause" state (the cursor
     // free, the player held) lasts while its menu is active, and hiding it locked the mouse.
     internal static class KillcraftPanel
     {
-        private static readonly string[] TabNames = { "PARTY", "VOICE", "REPLAY", "HUD" };
+        private static readonly string[] TabNames = { "PARTY", "RULES", "GAME", "VOICE", "LOOK", "REPLAY" };
+        private const int TabParty = 0, TabRules = 1, TabGame = 2, TabVoice = 3, TabLook = 4, TabReplay = 5;
+        private static readonly string[] BoardKeys = { "Tab", "CapsLock", "LeftAlt", "Backquote", "I", "O" };
+        private static readonly string[] PingKeys = { "Mouse3", "Mouse4", "Mouse5", "G", "X", "Z", "C", "LeftAlt" };
         private static readonly string[] Keys = { "V", "B", "T", "G", "X", "Z", "CapsLock", "LeftAlt", "Mouse4", "Mouse5" };
-        private const float W = 920f, H = 680f, In = 30f, PageY = 138f, Foot = 50f;
+        private const float W = 1000f, H = 700f, In = 30f, PageY = 138f, Foot = 50f;
 
         private sealed class PlayerRow
         {
@@ -34,9 +39,12 @@ namespace Killcraft
         private static Canvas canvas;
         private static RectTransform panel, popup;
         private static int tab;
-        private static readonly GameObject[] pages = new GameObject[4];
-        private static readonly UiButton[] tabs = new UiButton[4];
-        private static readonly List<Action>[] refreshers = { new List<Action>(), new List<Action>(), new List<Action>(), new List<Action>() };
+        private static readonly GameObject[] pages = new GameObject[6];
+        private static readonly UiButton[] tabs = new UiButton[6];
+        private static readonly List<Action>[] refreshers =
+        {
+            new List<Action>(), new List<Action>(), new List<Action>(), new List<Action>(), new List<Action>(), new List<Action>(),
+        };
         private static GameObject returnTo, pauseButton;
         private static CanvasGroup hiddenGroup;
         private static float hiddenAlpha = 1f;
@@ -410,7 +418,7 @@ namespace Killcraft
             x.Back.type = Image.Type.Simple;
             x.Refresh();
             Ui.Line(panel, Color.white, In, 72f, W - 2f * In, 2f);
-            float tw = (W - 2f * In - 3f * 10f) / 4f;
+            float tw = (W - 2f * In - (TabNames.Length - 1) * 10f) / TabNames.Length;
             for (int i = 0; i < TabNames.Length; i++)
             {
                 int n = i;
@@ -425,10 +433,12 @@ namespace Killcraft
                 pages[i].SetActive(false);
                 refreshers[i].Clear();
             }
-            PartyPage(pages[0].transform);
-            VoicePage(pages[1].transform);
-            ReplayPage(pages[2].transform);
-            HudPage(pages[3].transform);
+            PartyPage(pages[TabParty].transform);
+            RulesPage(pages[TabRules].transform);
+            GamePage(pages[TabGame].transform);
+            VoicePage(pages[TabVoice].transform);
+            HudPage(pages[TabLook].transform);
+            ReplayPage(pages[TabReplay].transform);
             // The footer (UltraLink's): this run's time, SAVE REPLAY.
             footRun = Ui.Text(panel, "", 16f, Ui.Grey, TextAlignmentOptions.MidlineLeft, In, H - In - 40f, 400f, 36f);
             Ui.Button(panel, "SAVE REPLAY", 17f, Replay.SaveNow, W - In - 180f, H - In - 40f, 180f, 36f, TextAlignmentOptions.Center, true, 3f);
@@ -473,7 +483,7 @@ namespace Killcraft
                 level.text = $"<color=#999999>{diff}</color>";
             }
             int count = Mathf.Max(1, Party.Members.Count);
-            tabs[0].Set($"PARTY <size=13>{count}/10</size>");
+            tabs[TabParty].Set($"PARTY <size=13>{count}/10</size>");
             foreach (Action a in refreshers[tab])
             {
                 a();
@@ -662,7 +672,7 @@ namespace Killcraft
             {
                 footRun.text = $"THIS RUN  {Replay.RunClock}";
             }
-            if (micMeter != null && tab == 1 && micMeter.transform.parent is RectTransform meterBox)
+            if (micMeter != null && tab == TabVoice && micMeter.transform.parent is RectTransform meterBox)
             {
                 float level = Voice.Talking ? 0.35f + 0.6f * Mathf.Abs(Mathf.Sin(Time.unscaledTime * 13f)) * Mathf.Abs(Mathf.Sin(Time.unscaledTime * 5.3f + 1f)) : 0f;
                 micMeter.rectTransform.sizeDelta = new Vector2(Mathf.Max(0f, meterBox.rect.width - 4f) * level, 10f);
@@ -788,7 +798,7 @@ namespace Killcraft
 
         private static void VoicePage(Transform p)
         {
-            List<Action> r = refreshers[1];
+            List<Action> r = refreshers[TabVoice];
             float colW = PageW * 0.5f - 24f;
             float pageH = H - PageY - In - Foot;
             // Left: the microphone, then listening.
@@ -841,6 +851,7 @@ namespace Killcraft
             float rx = PageW * 0.5f + 24f;
             Ui.Text(p, "-- PLAYERS --", 20f, Color.white, TextAlignmentOptions.MidlineLeft, rx, 0f, 300f, 30f);
             talkingCount = Ui.Text(p, "", 16f, Ui.Grey, TextAlignmentOptions.MidlineRight, rx, 0f, colW, 30f);
+            talkingShown = -1;
             voicePlayers = Ui.Scroll(p, rx, 38f, colW, pageH - 38f, 6f, out _);
             voiceRowsKey = "";
             r.Add(() =>
@@ -862,9 +873,11 @@ namespace Killcraft
         private static void SwitchRow(Transform p, List<Action> refresh, float y, float w, string label, Func<bool> get, Action<bool> set)
         {
             Ui.Text(p, label, 19f, Color.white, TextAlignmentOptions.MidlineLeft, 0f, y, w - 60f, 32f);
-            UiSwitch sw = Ui.Switch(p, w - 50f, y + 4f, get(), set);
+            UiCheck sw = Ui.Check(p, w - 34f, y + 2f, get(), set, 28f);
             refresh.Add(() => sw.Set(get()));
         }
+
+        private static int talkingShown = -1;
 
         private static void VoiceRows(float w)
         {
@@ -881,7 +894,12 @@ namespace Killcraft
                     }
                 }
             }
-            talkingCount.text = $"{talking} TALKING";
+            // (Only when it changes: not a new string every frame.)
+            if (talking != talkingShown)
+            {
+                talkingShown = talking;
+                talkingCount.text = $"{talking} TALKING";
+            }
             string key = string.Join(",", ids);
             if (key != voiceRowsKey)
             {
@@ -945,7 +963,7 @@ namespace Killcraft
             lastSaved = Ui.Text(p, "", 17f, Ui.Grey, TextAlignmentOptions.MidlineLeft, 10f, 196f, colW - 100f, 30f);
             Ui.Button(p, "FOLDER", 15f, Replay.OpenFolder, colW - 80f, 198f, 80f, 26f, TextAlignmentOptions.Center, true, 2.2f);
             Ui.Line(p, new Color(0.3f, 0.3f, 0.3f), 0f, 232f, colW, 1f);
-            TextMeshProUGUI f = Ui.Text(p, $"Replays can be turned off in OPTIONS > {Brand.Name} > REPLAYS.", 15f, Ui.Grey, TextAlignmentOptions.TopLeft, 0f, 242f, colW, 40f);
+            TextMeshProUGUI f = Ui.Text(p, "Replays can be turned off in the GAME tab.", 15f, Ui.Grey, TextAlignmentOptions.TopLeft, 0f, 242f, colW, 40f);
             f.enableWordWrapping = true;
             Ui.Line(p, new Color(0.35f, 0.35f, 0.35f), PageW * 0.5f, 0f, 2f, pageH);
             float rx = PageW * 0.5f + 24f;
@@ -955,7 +973,7 @@ namespace Killcraft
             c.enableWordWrapping = true;
             marksText = Ui.Text(p, "", 16f, Ui.Grey, TextAlignmentOptions.TopLeft, rx, 132f, colW, pageH - 140f);
             marksText.enableWordWrapping = true;
-            refreshers[2].Add(() =>
+            refreshers[TabReplay].Add(() =>
             {
                 lastSaved.text = Replay.LastSavedLabel;
                 marksText.text = Replay.MarksLabel;
@@ -965,8 +983,9 @@ namespace Killcraft
         private static void HudPage(Transform p)
         {
             RectTransform list = Ui.Scroll(p, 0f, 0f, PageW, H - PageY - In - Foot, 4f, out _);
-            List<Action> r = refreshers[3];
+            List<Action> r = refreshers[TabLook];
             Section(list, "PARTY HUD", "In a level.");
+            Toggle(list, r, "Party style meter (co-op)", () => Plugin.PartyStyleOn.Value, v => Plugin.PartyStyleOn.Value = v);
             Toggle(list, r, "The others' cards (top left)", () => Plugin.PartyHudOn.Value, v => Plugin.PartyHudOn.Value = v);
             Slider(list, r, "Cards' size", 0.5f, 2f, () => Plugin.HudScale.Value, v => Plugin.HudScale.Value = v, v => $"{Mathf.RoundToInt(v * 100f)}%");
             Toggle(list, r, "Names over their V1s", () => Plugin.NameTags.Value, v => Plugin.NameTags.Value = v);
@@ -977,6 +996,42 @@ namespace Killcraft
             LookPicker(list, r);
             Cycle(list, r, "Your colour (name, card)", () => Plugin.MyColor.Value >= 0 && Plugin.MyColor.Value < Profiles.Colors.Length ? Profiles.Colors[Plugin.MyColor.Value].Name : "AUTO",
                 () => Plugin.MyColor.Value = Plugin.MyColor.Value + 1 >= Profiles.Colors.Length ? -1 : Plugin.MyColor.Value + 1);
+            Section(list, "YOUR HAT", "On your V1 for the others; for you in third person (F5).");
+            HatPicker(list, r);
+        }
+
+        // YOUR HAT: every hat a button, four to a row, the one worn lit.
+        private static void HatPicker(Transform list, List<Action> refresh)
+        {
+            const int perRow = 4;
+            const float gap = 10f, h = 40f;
+            float w = (PageW - 24f - gap * (perRow - 1)) / perRow;
+            int rows = (Hats.Names.Length + perRow - 1) / perRow;
+            RectTransform row = Ui.Row(list, rows * (h + gap));
+            var buttons = new UiButton[Hats.Names.Length];
+            Action show = () =>
+            {
+                int worn = Mathf.Clamp(Plugin.Hat.Value, 0, Hats.Names.Length - 1);
+                for (int k = 0; k < buttons.Length; k++)
+                {
+                    buttons[k].On = k == worn;
+                    buttons[k].Accent = k == worn ? Ui.Red : Color.white;
+                    buttons[k].TextOn = Color.white;
+                    buttons[k].Refresh();
+                }
+            };
+            for (int k = 0; k < Hats.Names.Length; k++)
+            {
+                int hat = k;
+                buttons[k] = Ui.Button(row, Hats.Names[k], 17f, () =>
+                {
+                    Plugin.Hat.Value = hat;
+                    Plugin.Log.LogInfo($"panel: hat {Hats.Names[hat]}");
+                    show();
+                }, 12f + (k % perRow) * (w + gap), (k / perRow) * (h + gap), w, h, TextAlignmentOptions.Center, true, 3f);
+            }
+            show();
+            refresh.Add(show);
         }
 
         // ---- rows ----
@@ -1003,8 +1058,132 @@ namespace Killcraft
         private static void Toggle(Transform list, List<Action> refresh, string label, Func<bool> get, Action<bool> set)
         {
             RectTransform row = Labeled(list, label);
-            UiSwitch sw = Ui.Switch(row, Control, 8f, get(), set);
+            UiCheck sw = Ui.Check(row, Control, 5f, get(), set);
             refresh.Add(() => sw.Set(get()));
+        }
+
+        // One of a few (ULTRAKILL's dropdown): the choice shown, the list under it when clicked.
+        private static void Choice(Transform list, List<Action> refresh, string label, string[] choices, Func<int> get, Action<int> set)
+        {
+            RectTransform row = Labeled(list, label);
+            Ui.Dropdown(row, 17f, Control, 5f, 380f, 30f, choices, () => Mathf.Clamp(get(), 0, choices.Length - 1), v =>
+            {
+                set(v);
+                refreshAt = 0f;
+            });
+        }
+
+        private static int KeyIndex(string[] keys, string key) =>
+            Mathf.Max(0, Array.FindIndex(keys, k => string.Equals(k, key, StringComparison.OrdinalIgnoreCase)));
+
+        // ---- RULES (the party host's) ----
+
+        private static void RulesPage(Transform p)
+        {
+            RectTransform list = Ui.Scroll(p, 0f, 0f, PageW, H - PageY - In - Foot, 4f, out _);
+            List<Action> r = refreshers[TabRules];
+            Section(list, "GAME MODE", "The party host's: everyone plays by them. Only the host can change them.");
+            Choice(list, r, "Game mode", new[] { "CO-OP", "VERSUS", "MINOS PRIME" }, () => MinosMode.Selected ? 2 : PartyRules.Mode, v =>
+            {
+                if (v == 2)
+                {
+                    PartyRules.SetMode(PartyRules.ModeCoop);
+                    MinosMode.SetSelected(true);
+                }
+                else
+                {
+                    MinosMode.SetSelected(false);
+                    PartyRules.SetMode(v);
+                }
+            });
+            Choice(list, r, "Versus: win by", new[] { PartyRules.WinByName(true), PartyRules.WinByName(false) },
+                () => PartyRules.VersusScore ? 0 : 1, v => PartyRules.SetVersusScore(v == 0));
+            Choice(list, r, "Versus: race", new[] { PartyRules.RaceName(false), PartyRules.RaceName(true) },
+                () => PartyRules.VersusLayer ? 1 : 0, v => PartyRules.SetVersusLayer(v == 1));
+            Toggle(list, r, "Level vote on the party screen", () => PartyRules.Mine ? Plugin.LevelVote.Value : PartyRules.Vote, PartyRules.SetVote);
+            Section(list, "THE PARTY");
+            Toggle(list, r, "PvP", () => PvpSetting.On, PvpSetting.Set);
+            Slider(list, r, "PvP damage", 0.1f, 3f, () => PvpSetting.Damage, PvpSetting.SetDamage, v => $"{Mathf.RoundToInt(v * 100f)}%");
+            Toggle(list, r, "Players bump into each other", () => PlayerCollision.On, PlayerCollision.Set);
+            Slider(list, r, "Enemy health per extra player", 0f, 2f, () => PartyRules.EnemyHealth, PartyRules.SetEnemyHealth, v => $"+{Mathf.RoundToInt(v * 100f)}%");
+            Slider(list, r, "Boss health per extra player", 0f, 2f, () => PartyRules.BossHealth, PartyRules.SetBossHealth, v => $"+{Mathf.RoundToInt(v * 100f)}%");
+            Choice(list, r, "Server list", new[] { "INVITE ONLY", "STEAM FRIENDS", "EVERYONE" }, () => Plugin.ListWorld.Value, v => Plugin.ListWorld.Value = v);
+        }
+
+        // ---- GAME (this player's own) ----
+
+        private static void GamePage(Transform p)
+        {
+            RectTransform list = Ui.Scroll(p, 0f, 0f, PageW, H - PageY - In - Foot, 4f, out _);
+            List<Action> r = refreshers[TabGame];
+            Section(list, "IN A PARTY");
+            Toggle(list, r, "Go where the party host goes", () => Plugin.FollowHost.Value, v => Plugin.FollowHost.Value = v);
+            Toggle(list, r, "Rejoin by itself after a drop or a crash", () => Plugin.AutoRejoin.Value, v => Plugin.AutoRejoin.Value = v);
+            Toggle(list, r, "Back on solid ground if you fall out", () => Plugin.OutOfMapRescue.Value, v => Plugin.OutOfMapRescue.Value = v);
+            Toggle(list, r, "Voices from their V1", () => Plugin.VoiceProximity.Value, v => Plugin.VoiceProximity.Value = v);
+            Section(list, "DYING IN A PARTY", "While someone else in the party is still alive in the level.");
+            Toggle(list, r, "Spectate them until a checkpoint", () => Plugin.SpectateOnDeath.Value, v => Plugin.SpectateOnDeath.Value = v);
+            Toggle(list, r, "Teammates can revive you", () => Plugin.Revive.Value, v => Plugin.Revive.Value = v);
+            Slider(list, r, "Time to revive", 1f, 10f, () => Plugin.ReviveSeconds.Value, v => Plugin.ReviveSeconds.Value = v, v => $"{v:0.0} S");
+            Section(list, "SCOREBOARD AND PINGS");
+            Toggle(list, r, "Scoreboard (level's end, key held)", () => Plugin.Scoreboard.Value, v => Plugin.Scoreboard.Value = v);
+            Choice(list, r, "Scoreboard key", Upper(BoardKeys), () => KeyIndex(BoardKeys, Plugin.ScoreboardKey.Value), v => Plugin.ScoreboardKey.Value = BoardKeys[v]);
+            Toggle(list, r, "Pings (mark an enemy or a spot)", () => Plugin.Pings.Value, v => Plugin.Pings.Value = v);
+            Choice(list, r, "Ping key", Upper(PingKeys), () => KeyIndex(PingKeys, Plugin.PingKey.Value), v => Plugin.PingKey.Value = PingKeys[v]);
+            Toggle(list, r, "A speaker over whoever's talking", () => Plugin.TalkIcons.Value, v => Plugin.TalkIcons.Value = v);
+            Section(list, "REPLAYS");
+            Toggle(list, r, "Record replays", () => Plugin.ReplaysOn.Value, v => Plugin.ReplaysOn.Value = v);
+            Section(list, "SHADERS", "K turns them on and off in a level.");
+            Toggle(list, r, "Shaders", () => ShaderPack.On, v => ShaderPack.On = v);
+            Choice(list, r, "Quality", Upper(ShaderPack.TierNames), () => ShaderPack.TierIndex, v => ShaderPack.TierIndex = v);
+            for (int k = 0; k < ShaderPack.SettingCount; k++)
+            {
+                int n = k;
+                Slider(list, r, ShaderPack.SettingName(n), ShaderPack.SettingMin(n), ShaderPack.SettingMax(n),
+                    () => ShaderPack.GetSetting(n), v => ShaderPack.SetSetting(n, v), v => $"{Mathf.RoundToInt(v * 100f)}%");
+            }
+            Button(list, "The preset's own look", "RESET", () =>
+            {
+                ShaderPack.ResetLook();
+                refreshAt = 0f;
+            });
+#if !KILLNET_ONLY
+            Section(list, "GAMEPLAY");
+            Toggle(list, r, "Enemies hit harder on harder difficulties", () => Plugin.DamageByDifficulty.Value, v => Plugin.DamageByDifficulty.Value = v);
+            Toggle(list, r, "Bosses' hits go through armour", () => Plugin.BossesPierceArmour.Value, v => Plugin.BossesPierceArmour.Value = v);
+            Toggle(list, r, "Mini-bosses in the Nether", () => Plugin.NetherMiniBosses.Value, v => Plugin.NetherMiniBosses.Value = v);
+            Slider(list, r, "Your damage to enemies", 0.05f, 2f, () => Plugin.DamageToUltrakill.Value, v => Plugin.DamageToUltrakill.Value = v, v => $"{Mathf.RoundToInt(v * 100f)}%");
+            Slider(list, r, "Enemies' damage to you", 0.1f, 3f, () => Plugin.DamageToMinecraft.Value, v => Plugin.DamageToMinecraft.Value = v, v => $"{Mathf.RoundToInt(v * 100f)}%");
+            Slider(list, r, "Bosses' extra damage", 0.5f, 3f, () => Plugin.BossDamage.Value, v => Plugin.BossDamage.Value = v, v => $"{Mathf.RoundToInt(v * 100f)}%");
+            Slider(list, r, "Enemies at a time in the Nether", 0f, 20f, () => Plugin.NetherEnemies.Value, v => Plugin.NetherEnemies.Value = Mathf.RoundToInt(v), v => $"{Mathf.RoundToInt(v)}");
+            Slider(list, r, "Block brightness", 0.05f, 2f, () => Plugin.BlockBrightness.Value, v =>
+            {
+                Plugin.BlockBrightness.Value = v;
+                WorldRender.BrightnessChanged();
+            }, v => $"{Mathf.RoundToInt(v * 100f)}%");
+            Section(list, "MINECRAFT", "These count from the next time Minecraft starts.");
+            Toggle(list, r, "Minecraft mobs fight enemies", () => Plugin.MobsFightEnemies.Value, v => Plugin.MobsFightEnemies.Value = v);
+            Toggle(list, r, "Minecraft mobs attack you in levels", () => Plugin.MobsAttackYouInLevels.Value, v => Plugin.MobsAttackYouInLevels.Value = v);
+            Toggle(list, r, "Thorns always hits back", () => Plugin.AlwaysThorns.Value, v => Plugin.AlwaysThorns.Value = v);
+            Toggle(list, r, "Dig into ULTRAKILL's levels", () => Plugin.DigIntoLevels.Value, v => Plugin.DigIntoLevels.Value = v);
+            Toggle(list, r, "Fresh Minecraft world each launch", () => Plugin.FreshWorld.Value, v => Plugin.FreshWorld.Value = v);
+            Slider(list, r, "TNT fuse (ticks)", 10f, 80f, () => Plugin.TntFuseTicks.Value, v => Plugin.TntFuseTicks.Value = Mathf.RoundToInt(v), v => $"{Mathf.RoundToInt(v)}");
+            Toggle(list, r, "KILLCRAFT in the start-up check", () => Plugin.BootLine.Value, v => Plugin.BootLine.Value = v);
+            if (Plugin.MinecraftThere)
+            {
+                Toggle(list, r, "Ask KILLNET or KILLCRAFT at start", () => Plugin.AskMode.Value, v => Plugin.AskMode.Value = v);
+            }
+#endif
+        }
+
+        private static string[] Upper(string[] a)
+        {
+            var o = new string[a.Length];
+            for (int i = 0; i < a.Length; i++)
+            {
+                o[i] = (a[i] ?? "").ToUpperInvariant();
+            }
+            return o;
         }
 
         private static void Cycle(Transform list, List<Action> refresh, string label, Func<string> shown, Action next)

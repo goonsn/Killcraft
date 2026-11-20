@@ -47,7 +47,7 @@ namespace Killcraft
         private static UiButton playAlone;
         // The party's game mode (its host's): NORMAL, or MINOS PRIME (MinosMode) and its settings.
         private static UiButton modeButton;
-        private const int ModePopup = int.MinValue + 1;
+        private const int ModePopup = int.MinValue + 1, VotePopup = int.MinValue + 2;
         private static readonly List<GameObject> hiddenMenuParts = new List<GameObject>();
         private static RectTransform squad, servers, popup;
         private static GameObject squadView, serversView;
@@ -357,7 +357,78 @@ namespace Killcraft
                 seq.objectsToActivate = list.ToArray();
             }
             Plugin.Log.LogInfo("party menu: REPLAYS and PARTY added to the main menu");
+            try
+            {
+                AddSocials(left);
+            }
+            catch (Exception e)
+            {
+                Plugin.Log.LogWarning($"party menu: the socials not changed ({e.Message})");
+            }
             return true;
+        }
+
+        // Under "INIT SOCIALS...OK": KillNet's pages in place of ULTRAKILL's own DISCORD / TWITTER / YOUTUBE.
+        // Each a copy of ULTRAKILL's DISCORD button, so it looks, lights up and opens its page the same way.
+        private static readonly string[,] Socials =
+        {
+            { "THUNDERSTORE", Brand.ThunderstoreUrl },
+            { "GITHUB", Brand.GithubUrl },
+            { "NEXUS", Brand.NexusUrl },
+            { "DISCORD", Brand.DiscordUrl },
+        };
+
+        private static void AddSocials(Transform left)
+        {
+            Transform panel = left.Find("Panel");
+            Transform discord = panel != null ? panel.Find("Discord") : null;
+            if (discord == null || panel.Find("Killcraft Social 0") != null)
+            {
+                return;
+            }
+            var d = (RectTransform)discord;
+            // (The gap between ULTRAKILL's own: 20 today.)
+            float gap = 20f;
+            var theirs = new List<GameObject>();
+            foreach (Transform t in panel)
+            {
+                if (t.GetComponent<WebButton>() == null)
+                {
+                    continue;
+                }
+                theirs.Add(t.gameObject);
+                if (t != discord && t is RectTransform rt && rt.anchoredPosition.x > d.anchoredPosition.x)
+                {
+                    gap = Mathf.Min(gap, rt.anchoredPosition.x - d.anchoredPosition.x - d.sizeDelta.x);
+                }
+            }
+            gap = Mathf.Max(gap, 10f);
+            float x = d.anchoredPosition.x;
+            int at = discord.GetSiblingIndex();
+            for (int i = 0; i < Socials.GetLength(0); i++)
+            {
+                string label = Socials[i, 0];
+                GameObject b = UnityEngine.Object.Instantiate(discord.gameObject, panel);
+                b.name = "Killcraft Social " + i;
+                b.transform.SetSiblingIndex(at + i);
+                b.GetComponent<WebButton>().url = Socials[i, 1];
+                float wide = 0f;
+                foreach (TMP_Text t in b.GetComponentsInChildren<TMP_Text>(true))
+                {
+                    t.text = t.text.Replace("DISCORD", label);
+                    wide = Mathf.Max(wide, t.GetPreferredValues(label).x);
+                }
+                var r = (RectTransform)b.transform;
+                float w = Mathf.Max(d.sizeDelta.x, Mathf.Ceil(wide) + 12f);
+                r.anchoredPosition = new Vector2(x, d.anchoredPosition.y);
+                r.sizeDelta = new Vector2(w, d.sizeDelta.y);
+                x += w + gap;
+            }
+            foreach (GameObject g in theirs)
+            {
+                g.SetActive(false);
+            }
+            Plugin.Log.LogInfo("party menu: the main menu's socials are KillNet's (THUNDERSTORE, GITHUB, NEXUS, DISCORD)");
         }
 
         private static void Wire(GameObject b, UnityEngine.Events.UnityAction click)
@@ -883,6 +954,10 @@ namespace Killcraft
                     {
                         MinosMode.HostStart();
                     }
+                    else if (PartyRules.Vote && !MinosMode.Selected)
+                    {
+                        VoteClicked();
+                    }
                     else if (Party.IAmHost)
                     {
                         Party.PlayAlone = false;
@@ -1186,17 +1261,29 @@ namespace Killcraft
             copy.gameObject.SetActive(code.Length > 0);
             string diff = Profiles.DifficultyName(Profiles.MyDifficulty());
             bool cheats = !ServerList.CheatsBlocked;
-            infoText.text = $"{(Party.OwnWorld ? Privacy() : "JOINED")}  ·  {diff}" + (cheats ? "" : "  ·  NO CHEATS") + (Room.Pvp ? "  ·  PVP" : "");
+            infoText.text = $"{(Party.OwnWorld ? Privacy() : "JOINED")}  ·  {diff}" + (cheats ? "" : "  ·  NO CHEATS") + (Room.Pvp ? "  ·  PVP" : "")
+                + (PartyRules.Vote ? "  ·  VOTE" : "");
 
             // CONTROL.
             privacy.gameObject.SetActive(Party.OwnWorld);
             Control(0, Party.OwnWorld ? "INVITE FRIENDS" : "INVITE (OWNER ONLY)", Party.OwnWorld);
             bool minos = MinosMode.Selected;
-            string modeLabel = !minos ? "GAME MODE: NORMAL"
+            bool versus = !minos && PartyRules.Mode == PartyRules.ModeVersus;
+            string modeLabel = !minos ? (versus ? "GAME MODE: VERSUS" : "GAME MODE: NORMAL")
                 : !Party.IAmHost && MinosMode.PickMode == MinosMode.PickVolunteer ? (MinosMode.Volunteering ? "VOLUNTEERED AS MINOS" : "VOLUNTEER AS MINOS")
                 : "GAME MODE: MINOS PRIME";
-            Control(1, modeLabel, Party.IAmHost || (minos && MinosMode.PickMode == MinosMode.PickVolunteer), true, minos);
-            Control(2, minos ? (Party.IAmHost ? "START MINOS PRIME" : "HOST STARTS THE ROUND") : Party.IAmHost ? "SELECT LEVEL" : "HOST PICKS THE LEVEL", Party.IAmHost, true, minos);
+            Control(1, modeLabel, Party.IAmHost || (minos && MinosMode.PickMode == MinosMode.PickVolunteer), true, minos || versus);
+            bool vote = PartyRules.Vote && !minos;
+            string voteLabel = "";
+            if (vote)
+            {
+                string winner = LevelVote.Winner(out int votes);
+                voteLabel = Party.IAmHost
+                    ? (winner.Length > 0 ? $"LEVEL VOTE: {Typing.Escape(LevelVote.Short(winner))} ({votes})" : "LEVEL VOTE: NO VOTES YET")
+                    : LevelVote.Mine.Length > 0 ? $"MY VOTE: {Typing.Escape(LevelVote.Short(LevelVote.Mine))}" : "VOTE FOR A LEVEL";
+            }
+            Control(2, minos ? (Party.IAmHost ? "START MINOS PRIME" : "HOST STARTS THE ROUND") : vote ? voteLabel : Party.IAmHost ? "SELECT LEVEL" : "HOST PICKS THE LEVEL",
+                Party.IAmHost || vote, true, minos);
             bool othersPlaying = false;
             foreach (Party.Member m in Party.Members)
             {
@@ -1367,7 +1454,7 @@ namespace Killcraft
             }
             bool waking = PartyWake.Active;
             bool ok = waking && PartyWake.Ready(id);
-            r.Status.text = (!waking ? StatusLine(i, me) : ok ? "<color=#FFFFFF>. . . OK</color>" : "WAIT FOR WAKE") + MinosMode.RowTag(id);
+            r.Status.text = (!waking ? StatusLine(i, me) : ok ? "<color=#FFFFFF>. . . OK</color>" : "WAIT FOR WAKE") + MinosMode.RowTag(id) + LevelVote.RowTag(id);
             Color glow = ok ? new Color(0.4f, 0.18f, 0.125f, 1f) : new Color(0.4f, 0.18f, 0.125f, 0f);
             r.Glow.color = Color.Lerp(r.Glow.color, glow, 0.5f);
             r.Ping.text = "";
@@ -1439,11 +1526,42 @@ namespace Killcraft
             Ui.Clear(popup);
             bool minos = MinosMode.Selected;
             const float pw = 570f, modeH = 60f, settingH = 42f, gap = 8f;
+            bool versus = !minos && PartyRules.Mode == PartyRules.ModeVersus;
             var rows = new List<(string Label, Action Act, float H, bool Chosen)>
             {
-                ("NORMAL\n<size=13><color=#9A9A9A>ULTRAKILL'S LEVELS, TOGETHER</color></size>", () => MinosMode.SetSelected(false), modeH, !minos),
-                ("MINOS PRIME\n<size=13><color=#9A9A9A>ONE OF YOU IS MINOS PRIME, THE REST ARE V1, IN HIS ARENA</color></size>", () => MinosMode.SetSelected(true), modeH, minos),
+                ("NORMAL\n<size=13><color=#9A9A9A>ULTRAKILL'S LEVELS, TOGETHER</color></size>", () =>
+                {
+                    MinosMode.SetSelected(false);
+                    PartyRules.SetMode(PartyRules.ModeCoop);
+                }, modeH, !minos && !versus),
+                ("VERSUS\n<size=13><color=#9A9A9A>EACH ON THEIR OWN (CYBER GRIND: LAST ONE STANDING)</color></size>", () =>
+                {
+                    MinosMode.SetSelected(false);
+                    PartyRules.SetMode(PartyRules.ModeVersus);
+                }, modeH, versus),
+                ("MINOS PRIME\n<size=13><color=#9A9A9A>ONE OF YOU IS MINOS PRIME, THE REST ARE V1, IN HIS ARENA</color></size>", () =>
+                {
+                    PartyRules.SetMode(PartyRules.ModeCoop);
+                    MinosMode.SetSelected(true);
+                }, modeH, minos),
             };
+            int modes = rows.Count;
+            if (!minos)
+            {
+                if (versus)
+                {
+                    rows.Add(("WIN BY:  " + PartyRules.WinByName(PartyRules.VersusScore), () => PartyRules.SetVersusScore(!PartyRules.VersusScore), settingH, false));
+                    rows.Add(("RACE:  " + PartyRules.RaceName(PartyRules.VersusLayer), () => PartyRules.SetVersusLayer(!PartyRules.VersusLayer), settingH, false));
+                }
+                rows.Add(("LEVEL VOTE:  " + (Plugin.LevelVote.Value ? "ON" : "OFF"), () => PartyRules.SetVote(!Plugin.LevelVote.Value), settingH, false));
+                if (!versus)
+                {
+                    rows.Add(($"ENEMY HEALTH PER PLAYER:  +{Mathf.RoundToInt(PartyRules.EnemyHealth * 100f)}%", () =>
+                        PartyRules.SetEnemyHealth(Next(PartyRules.EnemyHealth, 0f, 0.25f, 0.5f, 0.75f, 1f)), settingH, false));
+                    rows.Add(($"BOSS HEALTH PER PLAYER:  +{Mathf.RoundToInt(PartyRules.BossHealth * 100f)}%", () =>
+                        PartyRules.SetBossHealth(Next(PartyRules.BossHealth, 0f, 0.25f, 0.5f, 0.75f, 1f, 1.5f, 2f)), settingH, false));
+                }
+            }
             if (minos)
             {
                 rows.Add(("WHO'S MINOS:  " + MinosMode.PickName(MinosMode.PickMode), MinosMode.CyclePick, settingH, false));
@@ -1462,7 +1580,7 @@ namespace Killcraft
             {
                 h += row.H + gap;
             }
-            if (minos)
+            if (rows.Count > modes)
             {
                 h += 22f;  // (the settings' own line)
             }
@@ -1472,9 +1590,9 @@ namespace Killcraft
             for (int n = 0; n < rows.Count; n++)
             {
                 var row = rows[n];
-                if (n == 2)
+                if (n == modes)
                 {
-                    Ui.Text(popup, "-- MINOS PRIME SETTINGS --", 15f, Ui.Grey, TextAlignmentOptions.MidlineLeft, 16f, y, pw - 32f, 18f);
+                    Ui.Text(popup, minos ? "-- MINOS PRIME SETTINGS --" : versus ? "-- VERSUS SETTINGS --" : "-- PARTY SETTINGS --", 15f, Ui.Grey, TextAlignmentOptions.MidlineLeft, 16f, y, pw - 32f, 18f);
                     y += 22f;
                 }
                 Action act = row.Act;
@@ -1501,6 +1619,105 @@ namespace Killcraft
             popup.anchoredPosition += new Vector2(0f, -6f);
             popup.SetAsLastSibling();
             popup.gameObject.SetActive(true);
+        }
+
+        // The next of some steps after v (after the last: the first).
+        private static float Next(float v, params float[] steps)
+        {
+            for (int i = 0; i < steps.Length; i++)
+            {
+                if (steps[i] > v + 0.001f)
+                {
+                    return steps[i];
+                }
+            }
+            return steps[0];
+        }
+
+        // LEVEL VOTE (the host opened it): every level, how many picked it, this player's pick lit; the
+        // host's START (the most voted) and ULTRAKILL's level select (any other).
+        private static void VoteClicked()
+        {
+            if (popupFor == VotePopup && popup.gameObject.activeSelf)
+            {
+                popup.gameObject.SetActive(false);
+                popupFor = int.MinValue;
+                return;
+            }
+            VoteMenu();
+        }
+
+        private static void VoteMenu()
+        {
+            popupFor = VotePopup;
+            Ui.Clear(popup);
+            const float pw = 600f, ph = 640f, rowH = 40f;
+            popup.sizeDelta = new Vector2(pw, ph);
+            Ui.Sliced(Ui.Picture(Ui.Fill(popup, "Back"), Ui.BoxLineBlack, Color.white), 3f).raycastTarget = true;
+            Ui.Text(popup, "-- LEVEL VOTE --", 24f, Color.white, TextAlignmentOptions.Center, 0f, 12f, pw, 34f);
+            float y = 54f;
+            if (Party.IAmHost)
+            {
+                string winner = LevelVote.Winner(out int n);
+                UiButton start = Ui.Button(popup, winner.Length > 0 ? $"START {Typing.Escape(LevelVote.Short(winner))} ({n} VOTE{(n == 1 ? "" : "S")})" : "START (NO VOTES YET)",
+                    20f, () =>
+                    {
+                        if (LevelVote.Winner(out int _).Length == 0)
+                        {
+                            return;
+                        }
+                        popup.gameObject.SetActive(false);
+                        popupFor = int.MinValue;
+                        Close();
+                        LevelVote.StartWinner();
+                    }, 14f, y, (pw - 38f) / 2f, 46f, TextAlignmentOptions.Center, true, 3f);
+                start.Interactable = winner.Length > 0;
+                start.Accent = Ui.Red;
+                start.Refresh();
+                Ui.Button(popup, "LEVEL SELECT", 20f, () =>
+                {
+                    popup.gameObject.SetActive(false);
+                    popupFor = int.MinValue;
+                    Party.PlayAlone = false;
+                    SelectLevel();
+                }, 24f + (pw - 38f) / 2f, y, (pw - 38f) / 2f, 46f, TextAlignmentOptions.Center, true, 3f);
+                y += 58f;
+            }
+            else
+            {
+                Ui.Text(popup, "PICK THE LEVEL YOU'D PLAY NEXT. THE HOST STARTS IT.", 15f, Ui.Grey, TextAlignmentOptions.Center, 0f, y, pw, 24f);
+                y += 30f;
+            }
+            Dictionary<string, int> tally = LevelVote.Tally();
+            RectTransform list = Ui.Scroll(popup, 12f, y, pw - 24f, ph - y - 14f, 4f, out _);
+            foreach (var (scene, name) in Party.Levels())
+            {
+                int votes = tally.TryGetValue(scene, out int v) ? v : 0;
+                RectTransform row = Ui.Row(list, rowH);
+                string s = scene;
+                string label = Typing.Escape(name.ToUpperInvariant()) + (votes > 0 ? $"  <color=#FFD02E>{votes}</color>" : "");
+                UiButton b = Ui.Button(row, label, 17f, () =>
+                {
+                    LevelVote.Cast(s);
+                    refreshAt = 0f;
+                    VoteMenu();
+                }, 0f, 0f, pw - 44f, rowH - 4f, TextAlignmentOptions.MidlineLeft, true, 2.5f);
+                if (LevelVote.Mine == scene)
+                {
+                    b.On = true;
+                    b.Accent = Ui.Red;
+                    b.TextOn = Color.white;
+                    b.Refresh();
+                }
+            }
+            // (Beside CONTROL, its top at INVITE's.)
+            var corners = new Vector3[4];
+            ((RectTransform)control[0].transform).GetWorldCorners(corners);
+            popup.position = corners[1];
+            popup.anchoredPosition += new Vector2(584f, 0f);
+            popup.SetAsLastSibling();
+            popup.gameObject.SetActive(true);
+            Ui.Refont(popup);
         }
 
         // The ... menu for a player: make them host, kick them, mute them, their Steam profile.

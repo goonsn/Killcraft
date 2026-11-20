@@ -278,11 +278,53 @@ namespace Killcraft
                 shown.Insert(0, $"<alpha=#{(int)(alpha * 255f):X2}>{l.Text}");
                 n++;
             }
-            foreach (string s in shown)
+            // (Only as many as fit, the newest kept: the box cut its last lines off - the newest - when
+            // long ones wrapped, so what was just typed sometimes never showed.)
+            int keep = Fit(shown, typing);
+            for (int i = shown.Count - keep; i < shown.Count; i++)
             {
-                sb.AppendLine(s);
+                sb.AppendLine(shown[i]);
             }
             lines.text = sb.ToString();
+        }
+
+        private static string fitKey = "";
+        private static int fitKept;
+
+        private static int Fit(List<string> shown, bool typing)
+        {
+            if (shown.Count == 0)
+            {
+                return 0;
+            }
+            RectTransform rt = lines.rectTransform;
+            float w = rt.rect.width, h = rt.rect.height;
+            string key = $"{PartyChat.Version}|{shown.Count}|{typing}|{w:0}|{h:0}";
+            if (key == fitKey)
+            {
+                return Mathf.Min(fitKept, shown.Count);
+            }
+            fitKey = key;
+            fitKept = shown.Count;
+            if (w < 10f || h < 10f)
+            {
+                return fitKept;
+            }
+            var sb = new System.Text.StringBuilder();
+            for (int keep = shown.Count; keep >= 1; keep--)
+            {
+                sb.Clear();
+                for (int i = shown.Count - keep; i < shown.Count; i++)
+                {
+                    sb.AppendLine(shown[i]);
+                }
+                if (keep == 1 || lines.GetPreferredValues(sb.ToString(), w, 0f).y <= h)
+                {
+                    fitKept = keep;
+                    break;
+                }
+            }
+            return fitKept;
         }
 
         private static void Lock()

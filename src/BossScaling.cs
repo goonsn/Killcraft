@@ -2,8 +2,9 @@ using HarmonyLib;
 
 namespace Killcraft
 {
-    // Bosses are tougher with more players in the level: each other player there adds
-    // BossHealthPerPlayer of their health (ULTRAKILL's own health modifier, as its radiance does).
+    // Enemies are tougher with more players in the level: each other player there adds the party host's
+    // BossHealthPerPlayer of a boss's health, EnemyHealthPerPlayer of any other's (ULTRAKILL's own health
+    // modifier, as its radiance does: hits on it count for less). Not in VERSUS (each plays alone).
     [HarmonyPatch(typeof(EnemyIdentifier), "UpdateModifiers")]
     internal static class BossScaling
     {
@@ -19,11 +20,11 @@ namespace Killcraft
                 __instance.totalHealthModifier *= times;
                 return;
             }
-            if (!__instance.isBoss || !Room.Shared)
+            if (!Room.Shared || Pvp.Is(__instance))
             {
                 return;
             }
-            float per = UnityEngine.Mathf.Clamp(Plugin.BossHealthPerPlayer.Value, 0f, 2f);
+            float per = __instance.isBoss ? PartyRules.BossHealth : PartyRules.EnemyHealth;
             if (per > 0f)
             {
                 __instance.totalHealthModifier *= 1f + per * Room.Peers.Count;

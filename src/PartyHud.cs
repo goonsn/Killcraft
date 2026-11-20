@@ -15,12 +15,55 @@ namespace Killcraft
         {
             public RectTransform Root;
             public CanvasGroup Group;
-            public Image Back, Bar, Crown, HpBack, HpFill, Skull;
+            public Image Back, Bar, Crown, HpBack, HpFill, Skull, Rank, RankBack, RankFill, Talk;
             public TextMeshProUGUI Name, Hp, Status, BarText;
         }
 
         private static Canvas canvas;
         private static RectTransform cards, tags, banner;
+        private static float cardsTop = 40f;
+        private static readonly HarmonyLib.AccessTools.FieldRef<BossBarManager, RectTransform> bossContainer =
+            HarmonyLib.AccessTools.FieldRefAccess<BossBarManager, RectTransform>("containerRect");
+        private static readonly Vector3[] corners = new Vector3[4];
+
+        // How far down the screen ULTRAKILL's boss bars reach (this HUD's units from the top; 0: none up).
+        private static float BossBarsBottom()
+        {
+            try
+            {
+                BossBarManager bm = MonoSingleton<BossBarManager>.Instance;
+                RectTransform box = bm != null ? bossContainer(bm) : null;
+                if (box == null || !box.gameObject.activeInHierarchy)
+                {
+                    return 0f;
+                }
+                Canvas uk = box.GetComponentInParent<Canvas>();
+                Camera cam = uk != null && uk.rootCanvas.renderMode != RenderMode.ScreenSpaceOverlay ? uk.rootCanvas.worldCamera : null;
+                float lowest = float.MaxValue;
+                foreach (RectTransform bar in box)
+                {
+                    if (bar == null || !bar.gameObject.activeInHierarchy)
+                    {
+                        continue;
+                    }
+                    bar.GetWorldCorners(corners);
+                    foreach (Vector3 c in corners)
+                    {
+                        lowest = Mathf.Min(lowest, RectTransformUtility.WorldToScreenPoint(cam, c).y);
+                    }
+                }
+                if (lowest == float.MaxValue)
+                {
+                    return 0f;
+                }
+                float k = canvas != null && canvas.scaleFactor > 0f ? canvas.scaleFactor : 1f;
+                return Mathf.Clamp((Screen.height - lowest) / k, 0f, 600f);
+            }
+            catch
+            {
+                return 0f;
+            }
+        }
         private static TextMeshProUGUI bannerText;
         private static readonly Dictionary<int, Card> shown = new Dictionary<int, Card>();
         private sealed class Tag
@@ -28,6 +71,7 @@ namespace Killcraft
             public RectTransform Root, Box;
             public TextMeshProUGUI Text;
             public CanvasGroup Group;
+            public Image Talk;
         }
 
         private static readonly Dictionary<int, Tag> nameTags = new Dictionary<int, Tag>();
@@ -59,9 +103,21 @@ namespace Killcraft
             }
             float scale = Mathf.Clamp(Plugin.HudScale.Value, 0.5f, 2f);
             cards.localScale = new Vector3(scale, scale, 1f);
+            // (Under ULTRAKILL's boss bars while there are any: they covered the cards.)
+            float top = Mathf.Max(40f, BossBarsBottom() + 16f);
+            cardsTop = Mathf.MoveTowards(cardsTop, top, Time.unscaledDeltaTime * 900f);
+            cards.anchoredPosition = new Vector2(cards.anchoredPosition.x, -cardsTop);
             Cards(inLevel && Plugin.PartyHudOn.Value);
-            Tags(inLevel && Plugin.NameTags.Value);
+            Tags(inLevel && (Plugin.NameTags.Value || Plugin.TalkIcons.Value));
             Banner();
+        }
+
+        // A line across the top for a while (VERSUS: who won).
+        public static void Banner(string line, float seconds)
+        {
+            bannerLine = line;
+            bannerUntil = Time.unscaledTime + seconds;
+            Ui.ClickSound();
         }
 
         private static void Build()
@@ -104,6 +160,13 @@ namespace Killcraft
             c.Skull = Ui.Image(c.Root, Ui.Skull, Ui.Cyan, 14f, 66f, 20f, 18f);
             c.Skull.preserveAspect = true;
             c.Status = Ui.Text(c.Root, "", 18f, Color.white, TextAlignmentOptions.MidlineLeft, 14f, 64f, 284f, 24f);
+            // (Their style meter now: ULTRAKILL's own rank picture, how full under it. Talking: a speaker.)
+            c.Rank = Ui.Image(c.Root, null, Color.white, 300f, -8f, 50f, 50f);
+            c.Rank.preserveAspect = true;
+            c.RankBack = Ui.Image(c.Root, null, new Color(0f, 0f, 0f, 0.5f), 302f, 44f, 46f, 5f);
+            c.RankFill = Ui.Image(c.Root, null, Color.white, 302f, 44f, 46f, 5f);
+            c.Talk = Ui.Image(c.Root, Ui.Speaker, Ui.Cyan, 0f, 6f, 26f, 22f);
+            c.Talk.preserveAspect = true;
             // (No box behind: a thin dark edge keeps the writing readable on a bright level.)
             foreach (TextMeshProUGUI t in new[] { c.Name, c.Status, c.BarText })
             {
@@ -248,6 +311,27 @@ namespace Killcraft
             }
             c.Status.text = status;
             c.Bar.rectTransform.sizeDelta = new Vector2(4f, status.Length > 0 ? 86f : 60f);
+            int rank = -1;
+            float meter = 0f;
+            // (Their style meter no longer on their card: the party's one meter has it all now, PartyStyleHud.)
+            bool styled = false;
+            Sprite rs = styled ? Score.RankSprite(rank) : null;
+            c.Rank.gameObject.SetActive(rs != null);
+            c.RankBack.gameObject.SetActive(rs != null);
+            c.RankFill.gameObject.SetActive(rs != null);
+            if (rs != null)
+            {
+                c.Rank.sprite = rs;
+                c.RankFill.rectTransform.sizeDelta = new Vector2(46f * Mathf.Clamp01(meter), 5f);
+            }
+            bool talking = Plugin.TalkIcons.Value && Voice.IsSpeaking(m.Id);
+            c.Talk.gameObject.SetActive(talking);
+            if (talking)
+            {
+                float x = (m.PartyHost ? 50f : 14f) + Mathf.Min(c.Name.preferredWidth, rs != null ? 240f : 270f) + 8f;
+                c.Talk.rectTransform.anchoredPosition = new Vector2(x, -6f);
+                c.Talk.color = new Color(Ui.Cyan.r, Ui.Cyan.g, Ui.Cyan.b, 0.6f + 0.4f * Mathf.Abs(Mathf.Sin(Time.unscaledTime * 8f)));
+            }
         }
 
         public static string Clock(float seconds)
@@ -295,6 +379,12 @@ namespace Killcraft
                         Ui.Picture(t.Box, Ui.RoundFill, new Color(0f, 0f, 0f, 0.6f)).raycastTarget = false;
                         t.Text = Ui.Label(Ui.Fill(t.Box, "Text"), "", 24f, Color.white, TextAlignmentOptions.Center);
                         t.Text.raycastTarget = false;
+                        // (Talking: a speaker over the name, or where it'd be with names off.)
+                        RectTransform talk = Ui.Rect(t.Root, "Talk", 0f, 0f, 30f, 26f);
+                        talk.anchorMin = talk.anchorMax = new Vector2(0.5f, 0f);
+                        talk.pivot = new Vector2(0.5f, 0f);
+                        t.Talk = Ui.Picture(talk, Ui.Speaker, Ui.Cyan);
+                        t.Talk.preserveAspect = true;
                         nameTags[m.Id] = t;
                     }
                     gone.Remove(m.Id);
@@ -304,10 +394,21 @@ namespace Killcraft
                     float size = Mathf.Clamp(22f * 12f * Coords.U / Mathf.Max(sp.z, 1f), 7f, 22f);
                     t.Text.fontSize = size;
                     t.Group.alpha = Mathf.Clamp01(1.5f - sp.z / (90f * Coords.U));
-                    t.Root.gameObject.SetActive(m.Id != RemotePlayers.HiddenId);
-                    string talk = Voice.IsSpeaking(m.Id) ? " <color=#4FE6FF>))</color>" : "";
-                    t.Text.text = Typing.Escape(Profiles.NameOf(m.Id)) + talk;
+                    bool speaking = Plugin.TalkIcons.Value && Voice.IsSpeaking(m.Id);
+                    bool named = Plugin.NameTags.Value;
+                    t.Root.gameObject.SetActive(m.Id != RemotePlayers.HiddenId && (named || speaking));
+                    t.Box.gameObject.SetActive(named);
+                    t.Text.text = Typing.Escape(Profiles.NameOf(m.Id));
                     t.Box.sizeDelta = new Vector2(t.Text.preferredWidth + size * 0.9f, size * 1.45f);
+                    t.Talk.gameObject.SetActive(speaking);
+                    if (speaking)
+                    {
+                        float ts = size * 1.3f;
+                        var tr = t.Talk.rectTransform;
+                        tr.sizeDelta = new Vector2(ts * 1.2f, ts);
+                        tr.anchoredPosition = new Vector2(0f, named ? size * 1.45f + 4f : 0f);
+                        t.Talk.color = new Color(Ui.Cyan.r, Ui.Cyan.g, Ui.Cyan.b, 0.6f + 0.4f * Mathf.Abs(Mathf.Sin(Time.unscaledTime * 8f)));
+                    }
                 }
             }
             foreach (int id in gone)
@@ -321,6 +422,13 @@ namespace Killcraft
         private static void Waiting()
         {
             Profiles.Info me = Profiles.Mine;
+            // (VERSUS says its own: VersusHud.)
+            if (Versus.On)
+            {
+                waitScene = "";
+                waitingWas = 0;
+                return;
+            }
             if (me.State == Profiles.StateDone && Party.IsLevel(me.Scene) && waitScene != me.Scene)
             {
                 waitScene = me.Scene;

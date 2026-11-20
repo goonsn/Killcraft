@@ -198,7 +198,7 @@ namespace Killcraft
             pulses.Clear();
             outlined.Clear();
             empty.text = shown.Count > 0 ? "" : infos.Count > 0 ? "NOTHING MATCHES"
-                : "NO REPLAYS YET\n<size=14><color=#777777>A REPLAY IS SAVED AT A LEVEL'S END, OR FROM ESC > KILLCRAFT > REPLAY</color></size>";
+                : "NO REPLAYS YET\n<size=14><color=#777777>A REPLAY IS SAVED AT A LEVEL'S END, OR FROM ESC > " + Brand.Name + " > REPLAY</color></size>";
             foreach (Replay.Info i in shown)
             {
                 try

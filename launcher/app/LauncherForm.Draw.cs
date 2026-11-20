@@ -641,14 +641,17 @@ namespace KillNetLauncher
             int ly = BY + 4 * (BH + Gap) - Gap + 22;
             float linkFrom = MenuAt + 0.4f;
             Term(g, "INIT SOCIALS...OK", 130, ly, Ink, linkFrom, 80f);
-            SizeF gs = Measure(g, "GITHUB", small), ds = Measure(g, "DISCORD", small);
+            SizeF gs = Measure(g, "GITHUB", small), ds = Measure(g, "DISCORD", small), ts = Measure(g, "THUNDERSTORE", small);
             githubR = new Rectangle(130, ly + 30, (int)gs.Width, (int)gs.Height);
-            discordR = new Rectangle(130 + (int)gs.Width + 34, ly + 30, (int)ds.Width, (int)ds.Height);
+            discordR = new Rectangle(githubR.Right + 34, ly + 30, (int)ds.Width, (int)ds.Height);
+            thunderstoreR = new Rectangle(discordR.Right + 34, ly + 30, (int)ts.Width, (int)ts.Height);
             Term(g, "GITHUB", githubR.X, githubR.Y, linkHover == 0 ? Color.White : Ink, linkFrom + 0.25f, 80f);
             Term(g, "DISCORD", discordR.X, discordR.Y, linkHover == 1 ? Color.White : Ink, linkFrom + 0.35f, 80f);
-            if (linkHover >= 0)
+            Term(g, "THUNDERSTORE", thunderstoreR.X, thunderstoreR.Y, linkHover == 3 ? Color.White : Ink, linkFrom + 0.45f, 80f);
+            // (2 is the patch notes' own link, underlined there.)
+            if (linkHover == 0 || linkHover == 1 || linkHover == 3)
             {
-                Rectangle r = linkHover == 0 ? githubR : discordR;
+                Rectangle r = linkHover == 0 ? githubR : linkHover == 1 ? discordR : thunderstoreR;
                 g.FillRectangle(Brushes.White, r.X, r.Bottom + 1, r.Width, 3);
             }
             DrawNews(g, t);

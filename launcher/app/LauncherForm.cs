@@ -53,7 +53,7 @@ namespace KillNetLauncher
         private float shownAt = float.NaN, leftAt = -100f;
         private bool options;
         private int selected, pressed = -1;
-        private Rectangle githubR, discordR;
+        private Rectangle githubR, discordR, thunderstoreR;
         private int linkHover = -1;
 
         // What's there and what's going on.
@@ -741,7 +741,7 @@ namespace KillNetLauncher
             return -1;
         }
 
-        private int LinkAt(Point page) => T < MenuAt + 0.6f ? -1 : githubR.Contains(page) ? 0 : discordR.Contains(page) ? 1 : notesLinkR.Contains(page) ? 2 : -1;
+        private int LinkAt(Point page) => T < MenuAt + 0.6f ? -1 : githubR.Contains(page) ? 0 : discordR.Contains(page) ? 1 : notesLinkR.Contains(page) ? 2 : thunderstoreR.Contains(page) ? 3 : -1;
 
         protected override void OnMouseWheel(MouseEventArgs e)
         {
@@ -822,7 +822,7 @@ namespace KillNetLauncher
                 if (link >= 0)
                 {
                     Sfx.Play(Sfx.Click);
-                    Installer.Open(link == 0 ? Installer.RepoUrl : link == 1 ? Installer.DiscordUrl
+                    Installer.Open(link == 0 ? Installer.RepoUrl : link == 1 ? Installer.DiscordUrl : link == 3 ? Installer.ThunderstoreUrl
                         : latest != null && latest.Page.Length > 0 ? latest.Page : Installer.RepoUrl + "/releases");
                 }
             }

@@ -35,6 +35,7 @@ namespace KillNetLauncher
         }
 
         public const string DiscordUrl = "https://discord.gg/UZsPDRvnGJ";
+        public const string ThunderstoreUrl = "https://thunderstore.io/c/ultrakill/p/RedCircuit/KillNet/";
 
         static Installer()
         {
